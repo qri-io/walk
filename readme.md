@@ -5,6 +5,13 @@
 [![Codecov](https://img.shields.io/codecov/c/github/qri-io/walk.svg?style=flat-square)](https://codecov.io/gh/qri-io/walk)
 [![CI](https://img.shields.io/circleci/project/github/qri-io/walk.svg?style=flat-square)](https://circleci.com/gh/qri-io/walk)
 
+Walk is a system for scraping a BIG list of URLs (or a whole host/origin) and processing the results in multiple ways.
+
+![System Diagram](docs/system_diagram.jpg)
+
+(System components are in square-edged boxes, while the format of data being sent between them is in round-edged boxes. Open questions highlighted in green.)
+
+---
 
 * NDJSON (nweline delimited JSON)
 
