@@ -15,9 +15,9 @@ var (
 	sigKilled bool
 )
 
-// CrawlCmd runs a crawl
-var CrawlCmd = &cobra.Command{
-	Use:   "crawl",
+// StartCmd runs a crawl
+var StartCmd = &cobra.Command{
+	Use:   "start",
 	Short: "generate a sitemap by crawling",
 	Run: func(cmd *cobra.Command, args []string) {
 		cfgPath, err := cmd.Flags().GetString("config")
@@ -25,25 +25,27 @@ var CrawlCmd = &cobra.Command{
 			fmt.Printf("error getting config: %s", err.Error())
 		}
 
-		crawl := lib.NewCrawl(lib.JSONConfigFromFilepath(cfgPath))
+		coord, stop, err := lib.NewWalk(lib.JSONConfigFromFilepath(cfgPath))
+		if err != nil {
+			fmt.Print(err.Error())
+			return
+		}
 
-		stop := make(chan bool)
 		go stopOnSigKill(stop)
-
-		if err := crawl.Start(stop); err != nil {
+		if err := coord.Start(stop); err != nil {
 			fmt.Printf("crawl failed: %s", err.Error())
 		}
 
-		if err := crawl.WriteJSON(""); err != nil {
-			fmt.Printf("error writing file: %s", err.Error())
-		}
+		// if err := crawl.WriteJSON(""); err != nil {
+		// 	fmt.Printf("error writing file: %s", err.Error())
+		// }
 
 		// log.Infof("crawl took: %f hours. wrote %d urls", time.Since(crawl.start).Hours(), crawl.urlsWritten)
 	},
 }
 
 func init() {
-	CrawlCmd.Flags().StringP("config", "c", "sitemap.config.json", "path to configuration json file")
+	StartCmd.Flags().StringP("config", "c", "config.json", "path to configuration json file")
 }
 
 func stopOnSigKill(stop chan bool) {

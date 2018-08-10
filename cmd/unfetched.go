@@ -40,21 +40,24 @@ as complete as can be), and add missing links to Seeds in configuration`,
 
 		cfg := &lib.Config{}
 		lib.JSONConfigFromFilepath(cfgPath)(cfg)
-		hosts := make([]*url.URL, len(cfg.Domains))
-		for i, domain := range cfg.Domains {
-			u, err := url.Parse(domain)
-			if err != nil {
-				panic(err.Error())
-			}
-			hosts[i] = u
-		}
+
+		// TODO - fix
+		hosts := []*url.URL{}
+		// hosts := make([]*url.URL, len(cfg.Domains))
+		// for i, domain := range cfg.Domains {
+		// 	u, err := url.Parse(domain)
+		// 	if err != nil {
+		// 		panic(err.Error())
+		// 	}
+		// 	hosts[i] = u
+		// }
 
 		data, err := ioutil.ReadFile(args[0])
 		if err != nil {
 			panic(err.Error())
 		}
 
-		urls := map[string]*lib.URL{}
+		urls := map[string]*lib.Resource{}
 		if err := json.Unmarshal(data, &urls); err != nil {
 			panic(err.Error())
 		}
