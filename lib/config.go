@@ -23,6 +23,7 @@ func DefaultConfig() *Config {
 			Seeds:            []string{"https://datatogether.org"},
 			MaxAttempts:      3,
 			StopAfterEntries: 5,
+			DoneScanMilli:    30000,
 		},
 		Workers: []*WorkerConfig{
 			&WorkerConfig{
@@ -77,10 +78,6 @@ type CoordinatorConfig struct {
 	// urls, checking links for unfetched urls. this "rehydrates" the crawler with urls that
 	// might be missed while avoiding duplicate fetching. default value of 0 disables the check
 	UnfetchedScanFreqMilliseconds int
-	// StaleDuration
-	StaleDurationHours int
-	// BackupWriteInterval configures how often to stop & write a backup of current progress
-	BackupWriteInterval int
 	// BackoffResponseCodes is a list of response codes that when encountered will add
 	// half the value of of CrawlDelayMilliseconds per request, slowing the crawl in response
 	// every minute

@@ -29,6 +29,10 @@ func (q MemQueue) Push(t *Request) {
 }
 
 // Pop removes a request from the queue
+// TODO - consider implementing acknowledgement/confirmation for guaranteed delivery:
+// when popping, move the item to a secondary queue, then delete it from that queue when
+// acknowledgement happens or move it back to the main queue if you don’t get
+// acknowledgement within a given timeframe because the worker died.
 func (q MemQueue) Pop() *Request {
 	return <-q
 }

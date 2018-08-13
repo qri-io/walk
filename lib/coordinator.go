@@ -258,6 +258,8 @@ func (c *Coordinator) setCrawlDelay(d time.Duration) {
 
 // urlStringIsCandidate scans the slice of crawlingURLS to see if we should GET
 // the passed-in url
+// TODO - this is slated to eventually not be a simple list of ignored URLs,
+// but a list of regexes or some other special pattern.
 func (c *Coordinator) urlStringIsCandidate(rawurl string) bool {
 	for _, ignore := range c.cfg.IgnorePatterns {
 		if strings.Contains(rawurl, ignore) {
@@ -270,12 +272,13 @@ func (c *Coordinator) urlStringIsCandidate(rawurl string) bool {
 		return false
 	}
 	for _, d := range c.domains {
-		if u.Path != "" && !strings.Contains(u.Path, d.Path) {
+		if d.Host != u.Host {
+			continue
+		} else if u.Path != "" && !strings.HasPrefix(u.Path, d.Path) {
 			return false
 		}
-		if d.Host == u.Host {
-			return true
-		}
+
+		return true
 	}
 	return false
 }
