@@ -45,7 +45,7 @@ var InboundLinksCmd = &cobra.Command{
 		}
 		urlstr := lib.NormalizeURLString(u)
 
-		urls := map[string]*lib.URL{}
+		urls := map[string]*lib.Resource{}
 		if err := json.Unmarshal(data, &urls); err != nil {
 			fmt.Printf("error decoding JSON sitemap: %s", err.Error())
 			return
