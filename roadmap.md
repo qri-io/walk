@@ -8,6 +8,23 @@ This project is being built on spare time across a number of groups & people who
 # Milestones
 We make use of (and try to maintain the accuracy of) [github milestones](https://github.com/qri-io/walk/milestones), which are the best way to track current progress of the project.
 
+Proposed milestones (in *rough* order):
+
+- [ ] Single application that can crawl a full web site or a simple list of URLs and store the results on disk
+- [ ] Swappable workers (one of which uses Headless Chrome)
+- [ ] Many pluggable result handlers (not just on-disk storage)
+- [ ] Distributed operation with workers on separate machines
+- [ ] Deploy it on a server somewhere to run regularly
+- [ ] Long-running process that can be scheduled to do different domains, page lists, etc. at different schedules
+- [ ] (HTTP?) API for setting up schedules/domains/page lists and querying results/stored data
+- [ ] External push notifications (probably web hooks)
+- [ ] Web UI for configuring schedules/domains/page lists
+
+# Background
+
+- [Use Cases](#use-cases)
+- [Why not just use ____?](#why-not-just-use-____)
+
 ** **
 
 # Use Cases
