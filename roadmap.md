@@ -42,3 +42,19 @@ EDGI is intending to spin this software up as a _running service_ for at least t
 - Proactive notification of captures that *differ* from the previous capture of the same URL
 
 - @mr0grog
+
+# Why not just use ____?
+
+There are lots of other tools and services for spidering, scraping, and monitoring web sites. Why build another one? The folks involved in this project have been relying on a variety of tools and services for this functionality so far, and this tool is our attempt to solve shortcomings we’ve encountered:
+
+- **Frameworks like Scrapy and open-source apps like Klaxon:** The architecture is very similar, but we are aiming to make sure we can scale up to a distributed system that can do a *lot* of work here, which is not always well supported in other tools. We also want to add a lot of functionality on *top* of a generalized scraping framework, like:
+    - storing results over a long term
+    - generating a standard set of richer metadata
+    - publishing push-style notifications to external systems, and
+    - making special considerations when a snapshot differs from the previous snapshot of the same page.
+
+    That said, it’s possible the end result of all this work could just be a lot of extensions and tooling built around something like Scrapy.
+
+- **The Internet Archive:** We love the Internet Archive! BUT, it’s critical that we generate complete snapshots of entire websites and that we do so on a regular and frequent schedule. It’s hard to make sure that happens with the Internet Archive, because their scope is so broad.
+
+- **Other private services, like Versionista:** We’ve used many of these services to support our own work for a long time! However, most folks working on this tool want to make sure our output is public, which usually involves a lot of extra work when using a third party service. At scale, many of these services can get expensive, too. Finally, we’re interested in having more control over and customization around this core piece of infrastructure.
