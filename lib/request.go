@@ -26,6 +26,8 @@ const (
 	RequestStatusFetch
 	// RequestStatusQueued indicates this Request is queued for fetching
 	RequestStatusQueued
+	// RequestStatusRequesting indicates this Request is currently being fetched
+	RequestStatusRequesting
 	// RequestStatusDone indicates this Request has successfully completed
 	RequestStatusDone
 	// RequestStatusFailed indicates this request cannot be completed

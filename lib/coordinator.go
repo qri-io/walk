@@ -79,6 +79,15 @@ func NewCoordinator(cfg *CoordinatorConfig, q Queue, frs RequestStore, rh []Reso
 	return c
 }
 
+// SetHandlers confirgures the coordinator's resource handlers
+func (c *Coordinator) SetHandlers(rh []ResourceHandler) error {
+	if !c.start.IsZero() {
+		return fmt.Errorf("crawl already started")
+	}
+	c.handlers = rh
+	return nil
+}
+
 // Start kicks off coordinated fetching, seeding the queue & store & awaiting responses
 // start will block until a signal is received on the stop channel, keep in mind
 // a number of conditions can stop the crawler depending on configuration
