@@ -15,6 +15,17 @@ type Config struct {
 	ResourceHandlers []*ResourceHandlerConfig
 }
 
+// ApplyConfigs takes zero or more configuration functions to produce
+// a single configuration
+func ApplyConfigs(configs ...func(c *Config)) *Config {
+	// combine configurations with default
+	cfg := DefaultConfig()
+	for _, o := range configs {
+		o(cfg)
+	}
+	return cfg
+}
+
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{

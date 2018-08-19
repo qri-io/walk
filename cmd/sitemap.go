@@ -94,7 +94,7 @@ func writeSitemapOnSigKill(stop chan bool, gen *sitemap.Generator, path string) 
 			log.Infof("  press ^C again to exit")
 			log.Infof(strings.Repeat("*", 72))
 			if err := gen.Generate(path); err != nil {
-				fmt.Errorf(err.Error())
+				fmt.Printf(err.Error())
 			}
 
 			stop <- true
