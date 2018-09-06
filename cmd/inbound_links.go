@@ -43,7 +43,7 @@ var InboundLinksCmd = &cobra.Command{
 			fmt.Printf("error parsing url:\n\t%s\n\t%s", rawurl, err.Error())
 			return
 		}
-		urlstr := lib.NormalizeURLString(u)
+		urlstr := lib.NormalizeURL(u)
 
 		urls := map[string]*lib.Resource{}
 		if err := json.Unmarshal(data, &urls); err != nil {

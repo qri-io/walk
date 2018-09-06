@@ -88,6 +88,11 @@ func (c *Coordinator) SetHandlers(rh []ResourceHandler) error {
 	return nil
 }
 
+// ResourceHandlers exposes the coordinator's ResourceHandlers
+func (c *Coordinator) ResourceHandlers() []ResourceHandler {
+	return c.handlers
+}
+
 // Start kicks off coordinated fetching, seeding the queue & store & awaiting responses
 // start will block until a signal is received on the stop channel, keep in mind
 // a number of conditions can stop the crawler depending on configuration

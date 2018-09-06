@@ -1,38 +1,33 @@
-// Package sitemap is a resource handler that generates sitemaps
-package sitemap
+package lib
 
 import (
 	"encoding/json"
 	"io/ioutil"
-	"net/url"
 	"os"
 	"time"
 
-	"github.com/PuerkitoBio/purell"
 	"github.com/dgraph-io/badger"
-	"github.com/qri-io/walk/lib"
-	"github.com/sirupsen/logrus"
 )
 
-var log = logrus.New()
-
-// Generator records resource reponses in a badgerDB key/value store
+// SitemapGenerator records resource reponses in a badgerDB key/value store
 // and can create JSON output of the desired
-type Generator struct {
-	prefix string
-	db     *badger.DB
+type SitemapGenerator struct {
+	prefix  string
+	db      *badger.DB
+	dstPath string
 }
 
-// NewGenerator creates a generator from a given prefix & badger.DB connection
-func NewGenerator(prefix string, db *badger.DB) *Generator {
-	return &Generator{
-		prefix: prefix,
-		db:     db,
+// NewSitemapGenerator creates a Sitemapgenerator from a given prefix & badger.DB connection
+func NewSitemapGenerator(prefix, dstPath string, db *badger.DB) *SitemapGenerator {
+	return &SitemapGenerator{
+		prefix:  prefix,
+		db:      db,
+		dstPath: dstPath,
 	}
 }
 
-// HandleResource implements lib.ResourceHandler to add sitemap
-func (g *Generator) HandleResource(r *lib.Resource) {
+// HandleResource implements ResourceHandler to add sitemap
+func (g *SitemapGenerator) HandleResource(r *Resource) {
 	me := NewEntryFromResource(r)
 
 	key, err := g.key(me)
@@ -59,8 +54,16 @@ func (g *Generator) HandleResource(r *lib.Resource) {
 	}
 }
 
+// FinalizeResources writes a json sitemap file to outpath
+func (g *SitemapGenerator) FinalizeResources() error {
+	if err := g.Generate(g.dstPath); err != nil {
+		return err
+	}
+	return nil
+}
+
 // key creates the canonicalized key for a Entry
-func (g *Generator) key(me *Entry) ([]byte, error) {
+func (g *SitemapGenerator) key(me *Entry) ([]byte, error) {
 	url, err := NormalizeURLString(me.URL)
 	if err != nil {
 		return nil, err
@@ -68,12 +71,12 @@ func (g *Generator) key(me *Entry) ([]byte, error) {
 	return append(g.prefixBytes(), []byte(url)...), nil
 }
 
-func (g *Generator) prefixBytes() []byte {
+func (g *SitemapGenerator) prefixBytes() []byte {
 	return []byte(g.prefix + ":")
 }
 
 // Generate creates a json sitemap file at the specified path
-func (g *Generator) Generate(path string) error {
+func (g *SitemapGenerator) Generate(path string) error {
 	sm := Sitemap{}
 	err := g.db.View(func(txn *badger.Txn) error {
 		it := txn.NewIterator(badger.DefaultIteratorOptions)
@@ -123,7 +126,7 @@ type Entry struct {
 
 // NewEntryFromResource pulls releveant values from a resource
 // to create a Entry
-func NewEntryFromResource(r *lib.Resource) *Entry {
+func NewEntryFromResource(r *Resource) *Entry {
 	return &Entry{
 		URL:       r.URL,
 		Title:     r.Title,
@@ -131,15 +134,6 @@ func NewEntryFromResource(r *lib.Resource) *Entry {
 		Status:    r.Status,
 		Links:     r.Links,
 	}
-}
-
-// NormalizeURLString canonicalizes a URL
-func NormalizeURLString(rawurl string) (string, error) {
-	u, err := url.Parse(rawurl)
-	if err != nil {
-		return "", err
-	}
-	return purell.NormalizeURL(u, purell.FlagsUnsafeGreedy), nil
 }
 
 // if c.cfg.BackupWriteInterval > 0 {

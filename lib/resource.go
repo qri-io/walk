@@ -110,7 +110,16 @@ func (u *Resource) HandleResponse(started time.Time, res *http.Response, recordH
 }
 
 // NormalizeURLString canonicalizes a URL
-func NormalizeURLString(u *url.URL) string {
+func NormalizeURLString(urlstr string) (string, error) {
+	u, err := url.Parse(urlstr)
+	if err != nil {
+		return "", err
+	}
+	return purell.NormalizeURL(u, purell.FlagsUnsafeGreedy), nil
+}
+
+// NormalizeURL canonicalizes a URL
+func NormalizeURL(u *url.URL) string {
 	return purell.NormalizeURL(u, purell.FlagsUnsafeGreedy)
 }
 
@@ -141,7 +150,7 @@ func (u *Resource) ExtractDocLinks(doc *goquery.Document) error {
 			return
 		}
 
-		str := NormalizeURLString(address)
+		str := NormalizeURL(address)
 		// deduplicate links
 		for _, l := range u.Links {
 			if str == l {

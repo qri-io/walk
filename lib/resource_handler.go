@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ugorji/go/codec"
 )
@@ -14,10 +15,17 @@ type ResourceHandler interface {
 	HandleResource(*Resource)
 }
 
+// ResourceFinalizer is an opt-in interface for ResourceHandler
+// Finalize is called when a crawl is concluded, giving handlers a chance
+// to clean up, write files, etc.
+type ResourceFinalizer interface {
+	FinalizeResources() error
+}
+
 // NewResourceHandlers creates a slice of ResourceHandlers from a slice of ResourceHandler configs
-func NewResourceHandlers(cfgs []*ResourceHandlerConfig) (rhs []ResourceHandler, err error) {
-	for _, c := range cfgs {
-		rh, err := NewResourceHandler(c)
+func NewResourceHandlers(cfg *Config) (rhs []ResourceHandler, err error) {
+	for _, c := range cfg.ResourceHandlers {
+		rh, err := NewResourceHandler(cfg, c)
 		if err != nil {
 			return nil, err
 		}
@@ -28,10 +36,16 @@ func NewResourceHandlers(cfgs []*ResourceHandlerConfig) (rhs []ResourceHandler, 
 }
 
 // NewResourceHandler creates a ResourceHandler from a config
-func NewResourceHandler(cfg *ResourceHandlerConfig) (ResourceHandler, error) {
-	switch cfg.Type {
+func NewResourceHandler(c *Config, cfg *ResourceHandlerConfig) (ResourceHandler, error) {
+	switch strings.ToUpper(cfg.Type) {
 	case "CBOR":
-		return &CBORResourceFileWriter{BasePath: cfg.SrcPath}, nil
+		return &CBORResourceFileWriter{BasePath: cfg.DestPath}, nil
+	case "SITEMAP":
+		db, err := c.BadgerDB()
+		if err != nil {
+			return nil, err
+		}
+		return NewSitemapGenerator(cfg.Prefix, cfg.DestPath, db), nil
 	default:
 		return nil, fmt.Errorf("unrecognized resource handler type: %s", cfg.Type)
 	}

@@ -17,7 +17,7 @@ func NewWalk(configs ...func(*Config)) (coord *Coordinator, stop chan bool, err 
 	if err != nil {
 		return
 	}
-	hs, err := NewResourceHandlers(cfg.ResourceHandlers)
+	hs, err := NewResourceHandlers(cfg)
 	if err != nil {
 		return
 	}

@@ -48,6 +48,8 @@ func (t *HTTPDirTestCase) Server() *httptest.Server {
 	return httptest.NewServer(http.FileServer(dir))
 }
 
+// Config generates the associated test case, with domains configured
+// for the passed-in test server
 func (t *HTTPDirTestCase) Config(s *httptest.Server) func(c *Config) {
 	return func(c *Config) {
 		JSONConfigFromFilepath(filepath.Join(t.DirPath, configFilename))(c)

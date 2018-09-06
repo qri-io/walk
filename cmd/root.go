@@ -29,6 +29,5 @@ func init() {
 	RootCmd.AddCommand(
 		StartCmd,
 		NormalizeURLCmd,
-		SitemapCmd,
 	)
 }

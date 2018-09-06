@@ -36,9 +36,13 @@ var StartCmd = &cobra.Command{
 			fmt.Printf("crawl failed: %s", err.Error())
 		}
 
-		// if err := crawl.WriteJSON(""); err != nil {
-		// 	fmt.Printf("error writing file: %s", err.Error())
-		// }
+		for _, rh := range coord.ResourceHandlers() {
+			if finalizer, ok := rh.(lib.ResourceFinalizer); ok {
+				if err := finalizer.FinalizeResources(); err != nil {
+					fmt.Printf("error finalizing resources: %s", err.Error())
+				}
+			}
+		}
 
 		// log.Infof("crawl took: %f hours. wrote %d urls", time.Since(crawl.start).Hours(), crawl.urlsWritten)
 	},
