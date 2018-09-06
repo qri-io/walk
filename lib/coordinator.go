@@ -79,7 +79,7 @@ func NewCoordinator(cfg *CoordinatorConfig, q Queue, frs RequestStore, rh []Reso
 	return c
 }
 
-// SetHandlers confirgures the coordinator's resource handlers
+// SetHandlers configures the coordinator's resource handlers
 func (c *Coordinator) SetHandlers(rh []ResourceHandler) error {
 	if !c.start.IsZero() {
 		return fmt.Errorf("crawl already started")

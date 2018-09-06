@@ -4,9 +4,10 @@ import (
 	"testing"
 )
 
-func TestCoordinatorRequeue(t *testing.T) {
+// test that a given URL won’t get queued more than once in the same crawl
+func TestCoordinatorNoRequeue(t *testing.T) {
 	reqs := map[string]int{}
-	tc := NewTestCase(t, "testdata/self_linking")
+	tc := NewHTTPDirTestCase(t, "testdata/self_linking")
 	s := tc.Server()
 
 	cfg := ApplyConfigs(tc.Config(s))

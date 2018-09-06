@@ -5,7 +5,7 @@ import (
 )
 
 func TestNewWalk(t *testing.T) {
-	tc := NewTestCase(t, "testdata/qri_io")
+	tc := NewHTTPDirTestCase(t, "testdata/qri_io")
 	s := tc.Server()
 
 	walk, stop, err := NewWalk(tc.Config(s))

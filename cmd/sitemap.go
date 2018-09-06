@@ -3,10 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"strings"
-	"syscall"
 
 	"github.com/dgraph-io/badger"
 	"github.com/qri-io/walk/lib"
@@ -55,14 +52,14 @@ var SitemapCmd = &cobra.Command{
 			return
 		}
 		path := filepath.Join(wd, "sitemap.json")
-		go writeSitemapOnSigKill(stop, gen, path)
+		go stopOnSigKill(stop)
 		if err := coord.Start(stop); err != nil {
 			fmt.Printf("crawl failed: %s", err.Error())
 		}
 
-		// if err := crawl.WriteJSON(""); err != nil {
-		// 	fmt.Printf("error writing file: %s", err.Error())
-		// }
+		if err := gen.Generate(path); err != nil {
+			fmt.Printf(err.Error())
+		}
 
 		// log.Infof("crawl took: %f hours. wrote %d urls", time.Since(crawl.start).Hours(), crawl.urlsWritten)
 	},
@@ -70,34 +67,4 @@ var SitemapCmd = &cobra.Command{
 
 func init() {
 	SitemapCmd.Flags().StringP("config", "c", "config.json", "path to configuration json file")
-}
-
-func writeSitemapOnSigKill(stop chan bool, gen *sitemap.Generator, path string) {
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch,
-		syscall.SIGHUP,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGQUIT,
-	)
-
-	for {
-		<-ch
-		if sigKilled == true {
-			os.Exit(1)
-		}
-		sigKilled = true
-
-		go func() {
-			log.Infof(strings.Repeat("*", 72))
-			log.Infof("  received kill signal. stopping & writing file. this'll take a second")
-			log.Infof("  press ^C again to exit")
-			log.Infof(strings.Repeat("*", 72))
-			if err := gen.Generate(path); err != nil {
-				fmt.Printf(err.Error())
-			}
-
-			stop <- true
-		}()
-	}
 }

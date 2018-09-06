@@ -23,7 +23,7 @@ type Generator struct {
 	db     *badger.DB
 }
 
-// NewGenerator carets a generator from a given prefix & badger.DB connection
+// NewGenerator creates a generator from a given prefix & badger.DB connection
 func NewGenerator(prefix string, db *badger.DB) *Generator {
 	return &Generator{
 		prefix: prefix,
@@ -44,6 +44,7 @@ func (g *Generator) HandleResource(r *lib.Resource) {
 	value, err := json.Marshal(me)
 	if err != nil {
 		log.Debugf("error encoding map entry: %s", err.Error())
+		return
 	}
 
 	err = g.db.Update(func(txn *badger.Txn) error {

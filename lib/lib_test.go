@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-// TestCase is a simlation of a domain for crawling, constructed from a directory with a
+// HTTPDirTestCase is a simulation of a domain for crawling, constructed from a directory with a
 // standardized structure ()
-type TestCase struct {
+type HTTPDirTestCase struct {
 	Name    string
 	DirPath string
 	t       *testing.T
@@ -23,9 +23,9 @@ const (
 	siteDirName = "site"
 )
 
-// NewTestCase creates a test case from a given filepath & testing struct
-func NewTestCase(t *testing.T, path string) *TestCase {
-	return &TestCase{
+// NewHTTPDirTestCase creates a test case from a given filepath & testing struct
+func NewHTTPDirTestCase(t *testing.T, path string) *HTTPDirTestCase {
+	return &HTTPDirTestCase{
 		Name:    filepath.Base(path),
 		DirPath: path,
 		t:       t,
@@ -33,7 +33,7 @@ func NewTestCase(t *testing.T, path string) *TestCase {
 }
 
 // Server generates a test server from the test case siteDirName directory
-func (t *TestCase) Server() *httptest.Server {
+func (t *HTTPDirTestCase) Server() *httptest.Server {
 	path := filepath.Join(t.DirPath, siteDirName)
 
 	if fi, err := os.Stat(path); err != nil {
@@ -48,7 +48,7 @@ func (t *TestCase) Server() *httptest.Server {
 	return httptest.NewServer(http.FileServer(dir))
 }
 
-func (t *TestCase) Config(s *httptest.Server) func(c *Config) {
+func (t *HTTPDirTestCase) Config(s *httptest.Server) func(c *Config) {
 	return func(c *Config) {
 		JSONConfigFromFilepath(filepath.Join(t.DirPath, configFilename))(c)
 		c.Coordinator.Domains = append(c.Coordinator.Domains, s.URL)
