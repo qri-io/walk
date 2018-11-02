@@ -88,12 +88,12 @@ func (g *SitemapGenerator) Generate(path string) error {
 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 			item := it.Item()
 			k := item.Key()
-			v, err := item.Value()
-			if err != nil {
-				return err
-			}
 			e := &Entry{}
-			if err := json.Unmarshal(v, e); err != nil {
+
+			err := item.Value(func(val []byte) error {
+				return json.Unmarshal(val, e)
+			})
+			if err != nil {
 				return err
 			}
 			sm[string(k[len(prefix):])] = e
