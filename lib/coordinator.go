@@ -123,7 +123,7 @@ func (c *Coordinator) Start(stop chan bool) error {
 			for range doneScanT.C {
 				l, err := c.queue.Len()
 				if err != nil {
-					log.Error("error getting queue length: %s", err.Error())
+					log.Errorf("error getting queue length: %s", err.Error())
 					continue CHECK
 				}
 				if l == 0 {
