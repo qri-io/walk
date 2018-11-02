@@ -46,7 +46,7 @@ EDGI is intending to spin this software up as a _running service_ for at least t
 - It’s a live, running service (not just code), so the actual scraping is de-duplicated across all our projects that have scraping needs.
 
 ### Web Archiving Project
-- Complient the archives of existing sources like the Internet Archive by building infrastracture that can match common archiving formats & specs (eg: WARC files)
+- Compliment the archives of existing sources like the Internet Archive by building infrastructure that can match common archiving formats & specs (eg: WARC files)
 - Re-contextualize those same archives on the distributed web (eg: IPFS, Dat)
 - Regular (in time) crawls of designated dataset & "grey material" URLS
 - Have fewer crawlers running against these host services by using the same fetches as the web monitoring project.
