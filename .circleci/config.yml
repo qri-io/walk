@@ -3,10 +3,9 @@ jobs:
   build:
     working_directory: /go/src/github.com/qri-io/walk
     docker:
-      - image: circleci/golang:1.10.3
+      - image: circleci/golang:1.11.1
         environment:
           GOLANG_ENV: test
-          PORT: 3000
     environment:
       TEST_RESULTS: /tmp/test-results
     steps:
