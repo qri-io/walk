@@ -1,9 +1,6 @@
 package lib
 
 import (
-	"os"
-	"path/filepath"
-
 	"github.com/dgraph-io/badger"
 )
 
@@ -18,16 +15,18 @@ type BadgerConfig struct {
 
 // NewBadgerConfig creates a badger configuration with default options
 func NewBadgerConfig() *BadgerConfig {
-	wd, err := os.Getwd()
-	if err != nil {
-		panic(err)
-	}
+	// wd, err := os.Getwd()
+	// if err != nil {
+	// 	panic(err)
+	// }
 
 	cfg := &BadgerConfig{
 		Options: badger.DefaultOptions,
 	}
-	cfg.Dir = filepath.Join(wd, "badger")
-	cfg.ValueDir = filepath.Join(wd, "badger")
+	// cfg.Dir = filepath.Join(wd, "badger")
+	// cfg.ValueDir = filepath.Join(wd, "badger")
+	cfg.Dir = "badger"
+	cfg.ValueDir = "badger"
 
 	return cfg
 }
@@ -35,7 +34,7 @@ func NewBadgerConfig() *BadgerConfig {
 // DB returns a connection to Badger
 func (c *BadgerConfig) DB() (conn *badger.DB, err error) {
 	if db == nil {
-		// Open the Badger database located in the /tmp/badger directory.
+		// Open the Badger database at the location specified in c.Options
 		// It will be created if it doesn't exist.
 		if db, err = badger.Open(c.Options); err != nil {
 			log.Error(err.Error())

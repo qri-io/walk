@@ -104,10 +104,7 @@ func (w *LocalWorker) Start(coord WorkCoordinator) error {
 					log.Error(err.Error())
 					continue
 				}
-				i++
-				if i == len(w.queues) {
-					i = 0
-				}
+				i = (i + 1) % len(w.queues)
 			case <-w.stop:
 				for _, q := range w.queues {
 					q.Close()
@@ -195,8 +192,7 @@ func NewRecordRedirectClient(wc WorkCoordinator) *http.Client {
 			prev := via[len(via)-1]
 			prevurl := NormalizeURL(prev.URL)
 
-			r, _ := url.Parse(req.URL.String())
-			canurlstr := NormalizeURL(r)
+			canurlstr, _ := NormalizeURLString(req.URL.String())
 
 			if prevurl != canurlstr {
 				log.Infof("[%d] %s %s -> %s", req.Response.StatusCode, prev.Method, prevurl, canurlstr)

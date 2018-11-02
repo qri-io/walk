@@ -17,6 +17,9 @@ type SitemapGenerator struct {
 	dstPath string
 }
 
+// Type implements ResourceHandler, distinguishing this RH as "SITEMAP" type
+func (g *SitemapGenerator) Type() string { return "SITEMAP" }
+
 // NewSitemapGenerator creates a Sitemapgenerator from a given prefix & badger.DB connection
 func NewSitemapGenerator(prefix, dstPath string, db *badger.DB) *SitemapGenerator {
 	return &SitemapGenerator{
@@ -50,7 +53,7 @@ func (g *SitemapGenerator) HandleResource(r *Resource) {
 	})
 
 	if err != nil {
-		log.Debug("error adding map entry to badger: %s", err.Error())
+		log.Debugf("error adding map entry to badger: %s", err.Error())
 	}
 }
 

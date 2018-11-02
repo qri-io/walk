@@ -115,7 +115,7 @@ func NormalizeURLString(urlstr string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return purell.NormalizeURL(u, purell.FlagsUnsafeGreedy), nil
+	return NormalizeURL(u), nil
 }
 
 // NormalizeURL canonicalizes a URL

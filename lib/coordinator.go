@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -99,6 +100,8 @@ func (c *Coordinator) ResourceHandlers() []ResourceHandler {
 func (c *Coordinator) Start(stop chan bool) error {
 	var (
 		unfetchedT, backoffT, doneScanT *time.Ticker
+		finalizerErrs                   []error
+		wg                              sync.WaitGroup
 	)
 
 	if len(c.cfg.BackoffResponseCodes) > 0 {
@@ -148,6 +151,7 @@ func (c *Coordinator) Start(stop chan bool) error {
 		}
 	}
 
+	// block until receive on stop
 	<-stop
 
 	// TODO - send stop signal to workers
@@ -158,6 +162,27 @@ func (c *Coordinator) Start(stop chan bool) error {
 	}
 	if backoffT != nil {
 		backoffT.Stop()
+	}
+
+	for _, rh := range c.ResourceHandlers() {
+		if finalizer, ok := rh.(ResourceFinalizer); ok {
+			wg.Add(1)
+			go func(t string, f ResourceFinalizer, errs *[]error) {
+				if err := f.FinalizeResources(); err != nil {
+					*errs = append(*errs, fmt.Errorf("%s: %s", t, err))
+				}
+				wg.Done()
+			}(rh.Type(), finalizer, &finalizerErrs)
+		}
+	}
+	wg.Wait()
+
+	if len(finalizerErrs) > 0 {
+		msg := "errors occured during finalization:\n"
+		for _, e := range finalizerErrs {
+			msg += fmt.Sprintf("%s\n", e.Error())
+		}
+		return fmt.Errorf(msg)
 	}
 
 	return nil

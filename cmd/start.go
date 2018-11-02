@@ -33,17 +33,9 @@ var StartCmd = &cobra.Command{
 
 		go stopOnSigKill(stop)
 		if err := coord.Start(stop); err != nil {
-			fmt.Printf("crawl failed: %s", err.Error())
+			fmt.Println(err)
+			os.Exit(1)
 		}
-
-		for _, rh := range coord.ResourceHandlers() {
-			if finalizer, ok := rh.(lib.ResourceFinalizer); ok {
-				if err := finalizer.FinalizeResources(); err != nil {
-					fmt.Printf("error finalizing resources: %s", err.Error())
-				}
-			}
-		}
-
 		// log.Infof("crawl took: %f hours. wrote %d urls", time.Since(crawl.start).Hours(), crawl.urlsWritten)
 	},
 }

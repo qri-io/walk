@@ -50,15 +50,20 @@ func DefaultConfig() *Config {
 			},
 		},
 		ResourceHandlers: []*ResourceHandlerConfig{},
+		Badger:           NewBadgerConfig(),
 		// DestPath: "sitemap.json",
 	}
 }
+
+// ErrNoBadgerConfig is the result of attempting to connect to a badgerDB
+// without one configured
+var ErrNoBadgerConfig = fmt.Errorf("badger is not configured")
 
 // BadgerDB returns the badger DB connection, creating a default-configured
 // badger store if one doesn't exist
 func (cfg *Config) BadgerDB() (*badger.DB, error) {
 	if cfg.Badger == nil {
-		cfg.Badger = NewBadgerConfig()
+		return nil, ErrNoBadgerConfig
 	}
 	return cfg.Badger.DB()
 }

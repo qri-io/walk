@@ -12,6 +12,7 @@ import (
 // ResourceHandler is the interface for doing stuff with a resource,
 // usually just after it's been created
 type ResourceHandler interface {
+	Type() string
 	HandleResource(*Resource)
 }
 
@@ -22,7 +23,7 @@ type ResourceFinalizer interface {
 	FinalizeResources() error
 }
 
-// NewResourceHandlers creates a slice of ResourceHandlers from a slice of ResourceHandler configs
+// NewResourceHandlers creates a slice of ResourceHandlers from a config
 func NewResourceHandlers(cfg *Config) (rhs []ResourceHandler, err error) {
 	for _, c := range cfg.ResourceHandlers {
 		rh, err := NewResourceHandler(cfg, c)
@@ -56,6 +57,9 @@ func NewResourceHandler(c *Config, cfg *ResourceHandlerConfig) (ResourceHandler,
 type CBORResourceFileWriter struct {
 	BasePath string
 }
+
+// Type implements ResourceHandler, distinguishing this RH as "CBOR" type
+func (rh *CBORResourceFileWriter) Type() string { return "CBOR" }
 
 // HandleResource implements the ResourceHandler interface
 func (rh *CBORResourceFileWriter) HandleResource(rsc *Resource) {
