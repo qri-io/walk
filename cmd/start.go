@@ -41,7 +41,6 @@ var StartCmd = &cobra.Command{
 }
 
 func init() {
-	StartCmd.Flags().StringP("config", "c", "config.json", "path to configuration json file")
 }
 
 func stopOnSigKill(stop chan bool) {

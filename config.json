@@ -1,0 +1,32 @@
+{
+  "Coordinator": {
+    "Domains": [
+      "https://datatogether.org"
+    ],
+    "Seeds": [
+      "https://datatogether.org"
+    ],
+    "IgnorePatterns": null,
+    "DelayMilli": 0,
+    "StopAfterEntries": 5,
+    "StopURL": "",
+    "UnfetchedScanFreqMilliseconds": 0,
+    "BackoffResponseCodes": null,
+    "MaxAttempts": 3,
+    "DoneScanMilli": 30000
+  },
+  "RequestStore": null,
+  "Queue": null,
+  "Workers": [
+    {
+      "Parallelism": 2,
+      "Type": "local",
+      "DelayMilli": 500,
+      "Polite": true,
+      "RecordResponseHeaders": false,
+      "RecordRedirects": true,
+      "UserAgent": ""
+    }
+  ],
+  "ResourceHandlers": []
+}
