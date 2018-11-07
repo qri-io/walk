@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ugorji/go/codec"
 )
@@ -11,13 +12,21 @@ import (
 // ResourceHandler is the interface for doing stuff with a resource,
 // usually just after it's been created
 type ResourceHandler interface {
+	Type() string
 	HandleResource(*Resource)
 }
 
-// NewResourceHandlers creates a slice of ResourceHandlers from a slice of ResourceHandler configs
-func NewResourceHandlers(cfgs []*ResourceHandlerConfig) (rhs []ResourceHandler, err error) {
-	for _, c := range cfgs {
-		rh, err := NewResourceHandler(c)
+// ResourceFinalizer is an opt-in interface for ResourceHandler
+// Finalize is called when a crawl is concluded, giving handlers a chance
+// to clean up, write files, etc.
+type ResourceFinalizer interface {
+	FinalizeResources() error
+}
+
+// NewResourceHandlers creates a slice of ResourceHandlers from a config
+func NewResourceHandlers(cfg *Config) (rhs []ResourceHandler, err error) {
+	for _, c := range cfg.ResourceHandlers {
+		rh, err := NewResourceHandler(cfg, c)
 		if err != nil {
 			return nil, err
 		}
@@ -28,10 +37,16 @@ func NewResourceHandlers(cfgs []*ResourceHandlerConfig) (rhs []ResourceHandler, 
 }
 
 // NewResourceHandler creates a ResourceHandler from a config
-func NewResourceHandler(cfg *ResourceHandlerConfig) (ResourceHandler, error) {
-	switch cfg.Type {
+func NewResourceHandler(c *Config, cfg *ResourceHandlerConfig) (ResourceHandler, error) {
+	switch strings.ToUpper(cfg.Type) {
 	case "CBOR":
-		return &CBORResourceFileWriter{BasePath: cfg.SrcPath}, nil
+		return &CBORResourceFileWriter{BasePath: cfg.DestPath}, nil
+	case "SITEMAP":
+		db, err := c.BadgerDB()
+		if err != nil {
+			return nil, err
+		}
+		return NewSitemapGenerator(cfg.Prefix, cfg.DestPath, db), nil
 	default:
 		return nil, fmt.Errorf("unrecognized resource handler type: %s", cfg.Type)
 	}
@@ -42,6 +57,9 @@ func NewResourceHandler(cfg *ResourceHandlerConfig) (ResourceHandler, error) {
 type CBORResourceFileWriter struct {
 	BasePath string
 }
+
+// Type implements ResourceHandler, distinguishing this RH as "CBOR" type
+func (rh *CBORResourceFileWriter) Type() string { return "CBOR" }
 
 // HandleResource implements the ResourceHandler interface
 func (rh *CBORResourceFileWriter) HandleResource(rsc *Resource) {
@@ -65,72 +83,3 @@ func (rh *CBORResourceFileWriter) HandleResource(rsc *Resource) {
 		log.Error(err.Error())
 	}
 }
-
-// TODO @b5 - I'm hoping to implement the sitemap tricks from before as a resource handler
-// c.LoadSitemapFile(c.cfg.SrcPath)
-
-// if c.cfg.BackupWriteInterval > 0 {
-//  path := fmt.Sprintf("%s.backup", c.cfg.DestPath)
-//  log.Infof("writing backup sitemap: %s", path)
-//  if err := c.WriteJSON(path); err != nil {
-//    log.Errorf("error writing backup sitemap: %s", err.Error())
-//  }
-// }
-
-// LoadSitemapFile loads a sitemap.json file
-// func (h *SiteMapHandler) LoadSitemapFile(path string) error {
-// 	if filepath.Ext(path) == ".json" {
-// 		if f, err := os.Open(path); err == nil {
-// 			log.Infof("loading previous sitemap: %s", path)
-// 			urls := make(map[string]*URL)
-// 			if err := json.NewDecoder(f).Decode(&urls); err != nil {
-// 				return nil
-// 			}
-// 			c.urlLock.Lock()
-// 			defer c.urlLock.Unlock()
-
-// 			added := 0
-// 			for urlstr, u := range urls {
-// 				c.urls[urlstr] = u
-// 				added++
-// 			}
-// 			log.Info("********************")
-// 			log.Infof("added: %d prior urls", added)
-// 			log.Info("********************")
-// 		}
-// 	}
-// 	return nil
-// }
-
-// WriteJSON writes a sitemap.json file
-// func (h *SitemapHandler) WriteJSON(path string) error {
-// 	if path == "" {
-// 		path = c.cfg.DestPath
-// 	}
-
-// 	log.Infof("writing json index file to path: %s", path)
-
-// 	c.urlLock.Lock()
-// 	defer func() {
-// 		log.Infof("done writing json index file: %s", path)
-// 		c.urlLock.Unlock()
-// 	}()
-
-// 	f, err := os.Create(path)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	us := make(map[string]*URL)
-// 	i := 0
-// 	for key, u := range c.urls {
-// 		if !u.Timestamp.IsZero() {
-// 			us[key] = u
-// 			i++
-// 		}
-// 	}
-
-// 	enc := json.NewEncoder(f)
-// 	enc.SetIndent("", "  ")
-// 	return enc.Encode(us)
-// }

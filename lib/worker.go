@@ -12,7 +12,6 @@ import (
 // Worker is the interface turning Requests into Resources
 // by performing fetches
 type Worker interface {
-	// SetDelay
 	SetDelay(time.Duration)
 	Start(coord WorkCoordinator) error
 	Stop() error
@@ -43,15 +42,18 @@ func NewWorker(cfg *WorkerConfig) (w Worker, err error) {
 // LocalWorker is an in-process implementation of worker
 // TODO - finish parallelism implementation
 type LocalWorker struct {
-	coord   WorkCoordinator
-	stop    chan bool
-	cfg     *WorkerConfig
-	fetcher *fetchbot.Fetcher
-	queue   *fetchbot.Queue
+	coord    WorkCoordinator
+	stop     chan bool
+	cfg      *WorkerConfig
+	fetchers []*fetchbot.Fetcher
+	queues   []*fetchbot.Queue
 }
 
 // NewLocalWorker creates a LocalWorker with crawl configuration settings
 func NewLocalWorker(cfg *WorkerConfig) *LocalWorker {
+	if cfg.Parallelism == 0 {
+		cfg.Parallelism = 1
+	}
 	return &LocalWorker{
 		stop: make(chan bool),
 		cfg:  cfg,
@@ -67,25 +69,29 @@ func (w *LocalWorker) SetDelay(d time.Duration) {
 func (w *LocalWorker) Start(coord WorkCoordinator) error {
 	w.coord = coord
 	cfg := w.cfg
+	w.fetchers = make([]*fetchbot.Fetcher, cfg.Parallelism)
+	w.queues = make([]*fetchbot.Queue, cfg.Parallelism)
 
-	f := fetchbot.New(newMux(coord, cfg.RecordRedirects, cfg.RecordResponseHeaders))
-	f.DisablePoliteness = !cfg.Polite
-	f.CrawlDelay = time.Duration(cfg.DelayMilli) * time.Millisecond
-	f.UserAgent = cfg.UserAgent
-	if cfg.RecordRedirects {
-		f.HttpClient = NewRecordRedirectClient(coord)
-	}
-
-	w.fetcher = f
-
-	ch, err := coord.Queue()
+	ch, err := w.coord.Queue()
 	if err != nil {
 		return err
 	}
 
-	w.queue = w.fetcher.Start()
+	for i := 0; i < cfg.Parallelism; i++ {
+		f := fetchbot.New(newMux(coord, cfg.RecordRedirects, cfg.RecordResponseHeaders))
+		f.DisablePoliteness = !cfg.Polite
+		f.CrawlDelay = time.Duration(cfg.DelayMilli) * time.Millisecond
+		f.UserAgent = cfg.UserAgent
+		if cfg.RecordRedirects {
+			f.HttpClient = NewRecordRedirectClient(coord)
+		}
+
+		w.fetchers[i] = f
+		w.queues[i] = f.Start()
+	}
 
 	go func() {
+		i := 0
 		for {
 			select {
 			case fr := <-ch:
@@ -94,12 +100,15 @@ func (w *LocalWorker) Start(coord WorkCoordinator) error {
 					log.Error(err.Error())
 					continue
 				}
-				if err := w.queue.Send(tg); err != nil {
+				if err := w.queues[i].Send(tg); err != nil {
 					log.Error(err.Error())
 					continue
 				}
+				i = (i + 1) % len(w.queues)
 			case <-w.stop:
-				w.queue.Close()
+				for _, q := range w.queues {
+					q.Close()
+				}
 				break
 			}
 		}
@@ -134,7 +143,7 @@ func newMux(coord WorkCoordinator, recordRedirects, recordHeaders bool) *fetchbo
 
 			// TODO - huh? why this here? figure out & make a note
 			if recordRedirects {
-				r = &Resource{URL: NormalizeURLString(res.Request.URL)}
+				r = &Resource{URL: NormalizeURL(res.Request.URL)}
 			}
 
 			log.Infof("[%d] %s %s", res.StatusCode, ctx.Cmd.Method(), r.URL)
@@ -181,10 +190,9 @@ func NewRecordRedirectClient(wc WorkCoordinator) *http.Client {
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 
 			prev := via[len(via)-1]
-			prevurl := NormalizeURLString(prev.URL)
+			prevurl := NormalizeURL(prev.URL)
 
-			r, _ := url.Parse(req.URL.String())
-			canurlstr := NormalizeURLString(r)
+			canurlstr, _ := NormalizeURLString(req.URL.String())
 
 			if prevurl != canurlstr {
 				log.Infof("[%d] %s %s -> %s", req.Response.StatusCode, prev.Method, prevurl, canurlstr)

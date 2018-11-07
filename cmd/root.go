@@ -26,8 +26,10 @@ func Execute() {
 }
 
 func init() {
+	RootCmd.PersistentFlags().StringP("config", "c", "config.json", "path to configuration json file")
 	RootCmd.AddCommand(
 		StartCmd,
 		NormalizeURLCmd,
+		ConfigCmd,
 	)
 }

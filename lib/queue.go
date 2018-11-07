@@ -19,13 +19,27 @@ type Queue interface {
 	Chan() (chan *Request, error)
 }
 
-// MemQueue is an in-memory implementation of the Queue interface,
-// it's just a fancy channel
-type MemQueue chan *Request
+// MemQueue is an in-memory implementation of the Queue interface, with
+// optional funcs for listening in on push & pop calls
+type MemQueue struct {
+	channel chan *Request
+	OnPush  func(r *Request)
+	OnPop   func(r *Request)
+}
+
+// NewMemQueue initializes a new MemQueue
+func NewMemQueue() *MemQueue {
+	return &MemQueue{
+		channel: make(chan *Request),
+		OnPush:  func(r *Request) {},
+		OnPop:   func(r *Request) {},
+	}
+}
 
 // Push adds a fetch request to the end of the queue
-func (q MemQueue) Push(t *Request) {
-	q <- t
+func (q *MemQueue) Push(r *Request) {
+	q.OnPush(r)
+	q.channel <- r
 }
 
 // Pop removes a request from the queue
@@ -33,16 +47,26 @@ func (q MemQueue) Push(t *Request) {
 // when popping, move the item to a secondary queue, then delete it from that queue when
 // acknowledgement happens or move it back to the main queue if you don’t get
 // acknowledgement within a given timeframe because the worker died.
-func (q MemQueue) Pop() *Request {
-	return <-q
+func (q *MemQueue) Pop() *Request {
+	r := <-q.channel
+	q.OnPop(r)
+	return r
 }
 
 // Len returns the number of Requests in the queue
-func (q MemQueue) Len() (int, error) {
-	return len(q), nil
+func (q *MemQueue) Len() (int, error) {
+	return len(q.channel), nil
 }
 
 // Chan returns the queue structured as a go channel
-func (q MemQueue) Chan() (chan *Request, error) {
-	return (chan *Request)(q), nil
+func (q *MemQueue) Chan() (chan *Request, error) {
+	ch := make(chan *Request)
+	go func(q *MemQueue) {
+		for r := range q.channel {
+			q.OnPop(r)
+			ch <- r
+		}
+	}(q)
+
+	return ch, nil
 }

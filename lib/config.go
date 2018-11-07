@@ -4,15 +4,29 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+
+	"github.com/dgraph-io/badger"
 )
 
 // Config is the global configuration for all components of a walk
 type Config struct {
+	Badger           *BadgerConfig
 	Coordinator      *CoordinatorConfig
 	RequestStore     *RequestStoreConfig
 	Queue            *QueueConfig
 	Workers          []*WorkerConfig
 	ResourceHandlers []*ResourceHandlerConfig
+}
+
+// ApplyConfigs takes zero or more configuration functions to produce
+// a single configuration
+func ApplyConfigs(configs ...func(c *Config)) *Config {
+	// combine configurations with default
+	cfg := DefaultConfig()
+	for _, o := range configs {
+		o(cfg)
+	}
+	return cfg
 }
 
 // DefaultConfig returns the default configuration
@@ -36,8 +50,22 @@ func DefaultConfig() *Config {
 			},
 		},
 		ResourceHandlers: []*ResourceHandlerConfig{},
+		Badger:           NewBadgerConfig(),
 		// DestPath: "sitemap.json",
 	}
+}
+
+// ErrNoBadgerConfig is the result of attempting to connect to a badgerDB
+// without one configured
+var ErrNoBadgerConfig = fmt.Errorf("badger is not configured")
+
+// BadgerDB returns the badger DB connection, creating a default-configured
+// badger store if one doesn't exist
+func (cfg *Config) BadgerDB() (*badger.DB, error) {
+	if cfg.Badger == nil {
+		return nil, ErrNoBadgerConfig
+	}
+	return cfg.Badger.DB()
 }
 
 // JSONConfigFromFilepath returns a func that reads a json-encoded
@@ -119,4 +147,7 @@ type ResourceHandlerConfig struct {
 	SrcPath string
 	// DestPath is the path to the output site file
 	DestPath string
+	// Prefix implements any namespacing for this config
+	// not used by all ResourceHandlers
+	Prefix string
 }

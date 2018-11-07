@@ -6,21 +6,18 @@ package lib
 // halt the walk by sending a value on the returned stop channel
 func NewWalk(configs ...func(*Config)) (coord *Coordinator, stop chan bool, err error) {
 	// combine configurations with default
-	cfg := DefaultConfig()
-	for _, o := range configs {
-		o(cfg)
-	}
+	cfg := ApplyConfigs(configs...)
 
 	// create queue, store, workers, and handlers
 	// TODO - needs to leverage config
-	queue := make(MemQueue)
+	queue := NewMemQueue()
 	// TODO - needs to leverage config
 	frs := NewMemRequestStore()
 	ws, err := NewWorkers(cfg.Workers)
 	if err != nil {
 		return
 	}
-	hs, err := NewResourceHandlers(cfg.ResourceHandlers)
+	hs, err := NewResourceHandlers(cfg)
 	if err != nil {
 		return
 	}

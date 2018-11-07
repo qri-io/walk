@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -79,12 +80,28 @@ func NewCoordinator(cfg *CoordinatorConfig, q Queue, frs RequestStore, rh []Reso
 	return c
 }
 
+// SetHandlers configures the coordinator's resource handlers
+func (c *Coordinator) SetHandlers(rh []ResourceHandler) error {
+	if !c.start.IsZero() {
+		return fmt.Errorf("crawl already started")
+	}
+	c.handlers = rh
+	return nil
+}
+
+// ResourceHandlers exposes the coordinator's ResourceHandlers
+func (c *Coordinator) ResourceHandlers() []ResourceHandler {
+	return c.handlers
+}
+
 // Start kicks off coordinated fetching, seeding the queue & store & awaiting responses
 // start will block until a signal is received on the stop channel, keep in mind
 // a number of conditions can stop the crawler depending on configuration
 func (c *Coordinator) Start(stop chan bool) error {
 	var (
 		unfetchedT, backoffT, doneScanT *time.Ticker
+		finalizerErrs                   []error
+		wg                              sync.WaitGroup
 	)
 
 	if len(c.cfg.BackoffResponseCodes) > 0 {
@@ -106,7 +123,7 @@ func (c *Coordinator) Start(stop chan bool) error {
 			for range doneScanT.C {
 				l, err := c.queue.Len()
 				if err != nil {
-					log.Error("error getting queue length: %s", err.Error())
+					log.Errorf("error getting queue length: %s", err.Error())
 					continue CHECK
 				}
 				if l == 0 {
@@ -134,6 +151,7 @@ func (c *Coordinator) Start(stop chan bool) error {
 		}
 	}
 
+	// block until receive on stop
 	<-stop
 
 	// TODO - send stop signal to workers
@@ -144,6 +162,27 @@ func (c *Coordinator) Start(stop chan bool) error {
 	}
 	if backoffT != nil {
 		backoffT.Stop()
+	}
+
+	for _, rh := range c.ResourceHandlers() {
+		if finalizer, ok := rh.(ResourceFinalizer); ok {
+			wg.Add(1)
+			go func(t string, f ResourceFinalizer, errs *[]error) {
+				if err := f.FinalizeResources(); err != nil {
+					*errs = append(*errs, fmt.Errorf("%s: %s", t, err))
+				}
+				wg.Done()
+			}(rh.Type(), finalizer, &finalizerErrs)
+		}
+	}
+	wg.Wait()
+
+	if len(finalizerErrs) > 0 {
+		msg := "errors occured during finalization:\n"
+		for _, e := range finalizerErrs {
+			msg += fmt.Sprintf("%s\n", e.Error())
+		}
+		return fmt.Errorf(msg)
 	}
 
 	return nil
