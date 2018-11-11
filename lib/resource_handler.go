@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/datatogether/cdxj"
 	"github.com/ugorji/go/codec"
 )
 
@@ -40,7 +41,7 @@ func NewResourceHandlers(cfg *Config) (rhs []ResourceHandler, err error) {
 func NewResourceHandler(c *Config, cfg *ResourceHandlerConfig) (ResourceHandler, error) {
 	switch strings.ToUpper(cfg.Type) {
 	case "CBOR":
-		return &CBORResourceFileWriter{BasePath: cfg.DestPath}, nil
+		return NewCBORResourceFileWriter(cfg.DestPath)
 	case "SITEMAP":
 		db, err := c.BadgerDB()
 		if err != nil {
@@ -52,10 +53,31 @@ func NewResourceHandler(c *Config, cfg *ResourceHandlerConfig) (ResourceHandler,
 	}
 }
 
-// CBORResourceFileWriter creates [multhash].cbor in a folder specified by BasePath
-// TODO - this needs more thought, given that many of our use cases are time-dependant
+// CBORResourceFileWriter creates [multhash].cbor in a folder specified by basePath
+// the file writer also writes a .cdxj index of the urls it recorded to basePath/index.cdxj
 type CBORResourceFileWriter struct {
-	BasePath string
+	basePath  string
+	indexFile *os.File
+	handle    *codec.CborHandle
+	index     *cdxj.Writer
+}
+
+// NewCBORResourceFileWriter writes
+func NewCBORResourceFileWriter(dir string) (*CBORResourceFileWriter, error) {
+	f, err := os.Create(filepath.Join(dir, "index.cdxj"))
+	if err != nil {
+		return nil, err
+	}
+
+	h := &codec.CborHandle{TimeRFC3339: true}
+	h.Canonical = true
+
+	return &CBORResourceFileWriter{
+		basePath:  dir,
+		handle:    h,
+		indexFile: f,
+		index:     cdxj.NewWriter(f),
+	}, nil
 }
 
 // Type implements ResourceHandler, distinguishing this RH as "CBOR" type
@@ -68,18 +90,27 @@ func (rh *CBORResourceFileWriter) HandleResource(rsc *Resource) {
 		return
 	}
 
-	f, err := os.Create(filepath.Join(rh.BasePath, rsc.Hash+".cbor"))
+	f, err := os.Create(filepath.Join(rh.basePath, rsc.Hash+".cbor"))
 	defer f.Close()
 	if err != nil {
 		log.Error(err.Error())
 		return
 	}
 
-	h := &codec.CborHandle{TimeRFC3339: true}
-	h.Canonical = true
-	enc := codec.NewEncoder(f, h)
-
+	enc := codec.NewEncoder(f, rh.handle)
 	if err := enc.Encode(rsc); err != nil {
 		log.Error(err.Error())
 	}
+
+	rec := cdxj.NewResponseRecord(rsc.URL, rsc.Timestamp, map[string]interface{}{
+		"hash": rsc.Hash,
+	})
+	if err := rh.index.Write(rec); err != nil {
+		log.Error(err.Error())
+	}
+}
+
+// FinalizeResources writes the index to it's destination writer
+func (rh *CBORResourceFileWriter) FinalizeResources() error {
+	return rh.index.Close()
 }

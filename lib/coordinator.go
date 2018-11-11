@@ -146,9 +146,7 @@ func (c *Coordinator) Start(stop chan bool) error {
 
 	c.start = time.Now()
 	for _, url := range c.cfg.Seeds {
-		if c.urlStringIsCandidate(url) {
-			c.enqueue(&Request{URL: url})
-		}
+		c.enqueue(&Request{URL: url})
 	}
 
 	// block until receive on stop
@@ -218,9 +216,11 @@ func (c *Coordinator) Completed(rsc ...*Resource) error {
 			log.Debugf("error dequing url: %s: %s", r.URL, err.Error())
 		}
 
-		for _, l := range r.Links {
-			if c.urlStringIsCandidate(l) {
-				links[l] = true
+		if c.cfg.Crawl {
+			for _, l := range r.Links {
+				if c.urlStringIsCandidate(l) {
+					links[l] = true
+				}
 			}
 		}
 	}

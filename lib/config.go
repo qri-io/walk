@@ -33,6 +33,7 @@ func ApplyConfigs(configs ...func(c *Config)) *Config {
 func DefaultConfig() *Config {
 	return &Config{
 		Coordinator: &CoordinatorConfig{
+			Crawl:            true,
 			Domains:          []string{"https://datatogether.org"},
 			Seeds:            []string{"https://datatogether.org"},
 			MaxAttempts:      3,
@@ -88,17 +89,21 @@ func JSONConfigFromFilepath(path string) func(*Config) {
 
 // CoordinatorConfig holds all Coordinator configuration details
 type CoordinatorConfig struct {
+	// Seeds is a list of urls to seed the crawler with
+	Seeds []string
+	// If true, links from completed resources returned to the coordinator will
+	// be added to the queue (aka, crawling). Only links within the domains list
+	// that don't match ignore patterns will be crawled
+	Crawl bool
 	// Domains is the list of domains to crawl. Only domains listed
 	// in this list will be crawled
 	Domains []string
-	// Seeds is a list of urls to seed the crawler with
-	Seeds []string
 	// Ignore is a list of url patterns to ignore
 	IgnorePatterns []string
 	// DelayMilli determines how long to wait between fetches for a given worker
 	DelayMilli int
-	// StopAfterEntries kills the crawler after a specified number of urls have been visited
-	// default of 0 don't limit the number of entries
+	// StopAfterEntries kills the crawler after a specified number of urls have
+	// been visited. default of 0 don't limit the number of entries
 	StopAfterEntries int
 	// StopUrl will stop the crawler after crawling a given URL
 	StopURL string
@@ -112,7 +117,7 @@ type CoordinatorConfig struct {
 	BackoffResponseCodes []int
 	// MaxAttempts is the maximum number of times to try a url before giving up
 	MaxAttempts int
-	// How frequently to check to see if
+	// How frequently to check to see if crawl is done, in milliseconds
 	DoneScanMilli int
 }
 

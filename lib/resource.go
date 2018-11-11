@@ -48,7 +48,7 @@ type Resource struct {
 	// Error contains any fetching error string
 	Error string `json:"error,omitempty"`
 	// contents of response body
-	Body []byte
+	Body []byte `json:"body,omitempty"`
 }
 
 // HeadersMap formats u.Headers (a string slice) as a map[header]value
@@ -67,15 +67,15 @@ func (u *Resource) HandleResponse(started time.Time, res *http.Response, recordH
 	var doc *goquery.Document
 
 	defer res.Body.Close()
-	body, err := ioutil.ReadAll(res.Body)
+	u.Body, err = ioutil.ReadAll(res.Body)
 	if err != nil {
 		return
 	}
 
 	u.Status = res.StatusCode
-	u.ContentLength = int64(len(body))
+	u.ContentLength = int64(len(u.Body))
 	u.ContentType = res.Header.Get("Content-Type")
-	u.ContentSniff = http.DetectContentType(body)
+	u.ContentSniff = http.DetectContentType(u.Body)
 	u.Timestamp = time.Now()
 
 	if recordHeaders {
@@ -86,7 +86,7 @@ func (u *Resource) HandleResponse(started time.Time, res *http.Response, recordH
 		u.RequestDuration = u.Timestamp.Sub(started)
 		log.Debugf("%s took %s", u.URL, u.RequestDuration.String())
 	}
-	if mh, e := multihash.Sum(body, multihash.SHA2_256, -1); e == nil {
+	if mh, e := multihash.Sum(u.Body, multihash.SHA2_256, -1); e == nil {
 		u.Hash = mh.String()
 	}
 
@@ -94,7 +94,7 @@ func (u *Resource) HandleResponse(started time.Time, res *http.Response, recordH
 	// sometimes xhtml documents can come back as text/plain, thus the text/plain addition
 	if u.ContentSniff == "text/html; charset=utf-8" || u.ContentSniff == "text/plain; charset=utf-8" {
 		// Process the body to find links
-		doc, err = goquery.NewDocumentFromReader(bytes.NewBuffer(body))
+		doc, err = goquery.NewDocumentFromReader(bytes.NewBuffer(u.Body))
 		if err != nil {
 			return
 		}
