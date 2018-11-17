@@ -1,0 +1,165 @@
+package lib
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/datatogether/cdxj"
+	"github.com/ugorji/go/codec"
+)
+
+// Anthology defines operations on a "collection of collections"
+type Anthology interface {
+	// Antologies must implement the collection interface, aggregating across all
+	// collections
+	Collection
+	// Collections gives access to the list of individual collections
+	Collections() ([]Collection, error)
+}
+
+// Collection are read-only operations on the result of a walk
+type Collection interface {
+	// Len returns the number of resources in the Collection
+	Len() int
+	// ID is an identifier for this collection
+	ID() string
+	// SortedIndex returns an abbreviated list of records, assumes
+	// the values are sorted by SURT url
+	SortedIndex(limit, offset int) ([]*Resource, error)
+	// FindIndex returns the porition within the index of a given url string, -1
+	// if it doesn't exist
+	FindIndex(url string) int
+	// Get returns a resource for a given URL
+	Get(url string) (*Resource, error)
+	// Timespan returns the earliest & latest dates this collection contains
+	Timespan() (start, stop time.Time)
+}
+
+// CBORResourceFileReader is an implementation of Collection that reads from CBOR archives,
+// implements the Collection interface
+type CBORResourceFileReader struct {
+	base        string
+	index       []*cdxj.Record
+	handle      codec.Handle
+	start, stop time.Time
+}
+
+// NewCBORResourceFileReader creates a reader from a path to a walk, loading the cdxj index
+func NewCBORResourceFileReader(path string) (*CBORResourceFileReader, error) {
+	r := &CBORResourceFileReader{
+		base:   path,
+		handle: &codec.CborHandle{},
+	}
+	if err := r.loadIndex(); err != nil {
+		return r, err
+	}
+	r.calcTimespan()
+	return r, nil
+}
+
+func (cr *CBORResourceFileReader) loadIndex() (err error) {
+	var f *os.File
+	if f, err = os.Open(filepath.Join(cr.base, "index.cdxj")); err != nil {
+		return
+	}
+	defer f.Close()
+
+	r := cdxj.NewReader(f)
+	cr.index, err = r.ReadAll()
+	return err
+}
+
+func (cr *CBORResourceFileReader) calcTimespan() {
+	cr.start, cr.stop = time.Now(), time.Time{}
+	for _, r := range cr.index {
+		if r.Timestamp.Before(cr.start) {
+			cr.start = r.Timestamp
+		}
+		if r.Timestamp.After(cr.stop) {
+			cr.stop = r.Timestamp
+		}
+	}
+}
+
+// Len returns the number of resources listed in the collection
+func (cr *CBORResourceFileReader) Len() int {
+	return len(cr.index)
+}
+
+// ID gives an identifier for this collection. not garunteed to be unique
+func (cr *CBORResourceFileReader) ID() string {
+	return filepath.Base(cr.base)
+}
+
+// Index gives a limit & Offset
+func (cr *CBORResourceFileReader) Index(limit, offset int) (rsc []*Resource, err error) {
+	for _, rec := range cr.index {
+		if offset > 0 {
+			offset--
+			continue
+		}
+
+		url, err := cdxj.UnSurtURL(rec.URI)
+		if err != nil {
+			return nil, err
+		}
+
+		rsc = append(rsc, &Resource{
+			URL:       url,
+			Timestamp: rec.Timestamp,
+		})
+
+		limit--
+		if limit == 0 {
+			break
+		}
+	}
+
+	return
+}
+
+// FindIndex returns the index position of a given url, -1 if not found
+func (cr *CBORResourceFileReader) FindIndex(url string) int {
+	surl, err := cdxj.SurtURL(url)
+	if err != nil {
+		return -1
+	}
+
+	for i, rec := range cr.index {
+		if surl == rec.URI {
+			return i
+		}
+	}
+	return -1
+}
+
+// Get grabs an individual resource from the collection
+func (cr *CBORResourceFileReader) Get(url string) (*Resource, error) {
+	idx := cr.FindIndex(url)
+	if idx == -1 {
+		return nil, fmt.Errorf("not found")
+	}
+
+	md := cr.index[idx].JSON
+	if md == nil || md["hash"] == nil {
+		return nil, fmt.Errorf("index is missing metadata")
+	}
+
+	path := filepath.Join(cr.base, fmt.Sprintf("%s.cbor", md["hash"].(string)))
+
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+
+	rsc := &Resource{}
+	err = codec.NewDecoder(f, cr.handle).Decode(rsc)
+	return rsc, err
+}
+
+// Timespan gives the earliest & latest times this collection covers
+func (cr *CBORResourceFileReader) Timespan() (start, stop time.Time) {
+	return cr.start, cr.stop
+}
