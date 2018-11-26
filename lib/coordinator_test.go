@@ -4,6 +4,18 @@ import (
 	"testing"
 )
 
+func TestNewWalkJob(t *testing.T) {
+	tc := NewHTTPDirTestCase(t, "testdata/qri_io")
+	s := tc.Server()
+
+	walk, stop, err := NewWalkJob(tc.Config(s))
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+
+	walk.Start(stop)
+}
+
 // test that a given URL won’t get queued more than once in the same crawl
 func TestCoordinatorNoRequeue(t *testing.T) {
 	reqs := map[string]int{}

@@ -4,14 +4,26 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/qri-io/walk/lib"
 	"github.com/sirupsen/logrus"
 )
 
+var log = logrus.New()
 
+// Server wraps an
 type Server struct {
+	collection lib.Collection
 	server *http.Server
 }
 
+// NewServer creates a new server
+func NewServer(col lib.Collection) *Server {
+	return &Server{
+		collection: col,
+	}
+}
+
+// Serve Blocks
 func (s *Server) Serve(port string) (err error) {
 	s.server := &http.Server{
 		Addr: fmt.Sprintf(":%s", port),
@@ -32,6 +44,9 @@ func NewServerRoutes(s *Server) *http.ServeMux {
 	m := http.NewServeMux()
 
 	m.Handle("/status", s.middleware(HealthCheckHandler))
+	
+	ch := CollectionHandlers(s.collection)
+	m.Handle("/walks", s.middleware(ch.HandleListWalks))
 
 	return m
 }

@@ -31,5 +31,6 @@ func init() {
 		StartCmd,
 		NormalizeURLCmd,
 		ConfigCmd,
+		ServerCmd,
 	)
 }

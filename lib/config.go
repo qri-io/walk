@@ -14,6 +14,7 @@ type Config struct {
 	Coordinator      *CoordinatorConfig
 	RequestStore     *RequestStoreConfig
 	Queue            *QueueConfig
+	Collection       *CollectionConfig
 	Workers          []*WorkerConfig
 	ResourceHandlers []*ResourceHandlerConfig
 }
@@ -39,6 +40,10 @@ func DefaultConfig() *Config {
 			MaxAttempts:      3,
 			StopAfterEntries: 5,
 			DoneScanMilli:    30000,
+		},
+		Collection: &CollectionConfig{
+			// default to checking local directory for collections
+			LocalDirs: []string{"."},
 		},
 		Workers: []*WorkerConfig{
 			&WorkerConfig{
@@ -74,17 +79,29 @@ func (cfg *Config) BadgerDB() (*badger.DB, error) {
 // file is present. If a file is present but not valid json, the program panics
 func JSONConfigFromFilepath(path string) func(*Config) {
 	return func(c *Config) {
-		if data, err := ioutil.ReadFile(path); err == nil {
-			cfg := Config{}
-			log.Infof("using config file: %s", path)
-			if err := json.Unmarshal(data, &cfg); err != nil {
-				err = fmt.Errorf("error parsing configuration file at path: %s: %s", path, err.Error())
-				log.Errorf(err.Error())
-				panic(err)
-			}
-			*c = cfg
+		cfg, err := ReadJSONConfigFile(path)
+		if err != nil {
+			panic(err)
 		}
+		log.Infof("using config file: %s", path)
+		*c = *cfg
 	}
+}
+
+// ReadJSONConfigFile reads a configuration JSON file
+func ReadJSONConfigFile(path string) (*Config, error) {
+	data, err := ioutil.ReadFile(path)
+	if err == nil {
+		err = fmt.Errorf("error reading configuration file at path: %s: %s", path, err.Error())
+		return nil, err
+	}
+
+	cfg := &Config{}
+	if err := json.Unmarshal(data, cfg); err != nil {
+		err = fmt.Errorf("error parsing configuration file at path: %s: %s", path, err.Error())
+	}
+
+	return cfg, nil
 }
 
 // CoordinatorConfig holds all Coordinator configuration details
@@ -155,4 +172,11 @@ type ResourceHandlerConfig struct {
 	// Prefix implements any namespacing for this config
 	// not used by all ResourceHandlers
 	Prefix string
+}
+
+// CollectionConfig configures the on-disk collection. There can be at most
+// one collection per walk process
+type CollectionConfig struct {
+	// LocalDirs is a slice of locations on disk to check for walks
+	LocalDirs []string
 }

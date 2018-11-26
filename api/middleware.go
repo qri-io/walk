@@ -6,10 +6,8 @@ import (
 	"time"
 
 	util "github.com/datatogether/api/apiutil"
-	"github.com/sirupsen/logrus"
 )
 
-var log = logrus.New()
 
 // middleware handles request logging
 func (s *Server) middleware(handler http.HandlerFunc) http.HandlerFunc {
