@@ -5,3 +5,5 @@ import (
 )
 
 var log = logrus.New()
+
+var VersionNumber = "0.1.0-dev"

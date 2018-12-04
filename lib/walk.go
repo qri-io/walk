@@ -23,7 +23,7 @@ type Walk interface {
 	// if it doesn't exist
 	FindIndex(url string) int
 	// Get returns a resource for a given URL
-	Get(url string) (*Resource, error)
+	Get(url string, t time.Time) (*Resource, error)
 	// Timespan returns the earliest & latest dates this Walk contains
 	Timespan() (start, stop time.Time)
 }
@@ -92,14 +92,10 @@ func (cr *CBORResourceFileReader) Index(limit, offset int) (rsc []*Resource, err
 			continue
 		}
 
-		url, err := cdxj.UnSurtURL(rec.URI)
-		if err != nil {
-			return nil, err
-		}
-
 		rsc = append(rsc, &Resource{
-			URL:       url,
+			URL:       rec.URI,
 			Timestamp: rec.Timestamp,
+			Hash:      rec.JSON["hash"].(string),
 		})
 
 		limit--
@@ -117,17 +113,45 @@ func (cr *CBORResourceFileReader) FindIndex(url string) int {
 	if err != nil {
 		return -1
 	}
+	url, err = cdxj.UnSurtURL(surl)
+	if err != nil {
+		return -1
+	}
 
 	for i, rec := range cr.index {
-		if surl == rec.URI {
+		if url == rec.URI {
 			return i
 		}
 	}
 	return -1
 }
 
+// SortedIndex returns an abbreviated list of records, assumes
+// the values are sorted by SURT url
+func (cr *CBORResourceFileReader) SortedIndex(limit, offset int) (rsc []*Resource, err error) {
+	for _, rec := range cr.index {
+		if offset > 0 {
+			offset--
+			continue
+		}
+
+		rsc = append(rsc, &Resource{
+			URL:       rec.URI,
+			Timestamp: rec.Timestamp,
+			Hash:      rec.JSON["hash"].(string),
+		})
+
+		limit--
+		if limit == 0 {
+			break
+		}
+	}
+
+	return rsc, nil
+}
+
 // Get grabs an individual resource from the Walk
-func (cr *CBORResourceFileReader) Get(url string) (*Resource, error) {
+func (cr *CBORResourceFileReader) Get(url string, t time.Time) (*Resource, error) {
 	idx := cr.FindIndex(url)
 	if idx == -1 {
 		return nil, fmt.Errorf("not found")

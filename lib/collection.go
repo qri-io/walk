@@ -19,6 +19,21 @@ type collection struct {
 	walks []Walk
 }
 
+// NewCollectionFromConfig creates a collection from a collection configuration
+// currently it only supports creating CBOR walk readers from exact directories
+// in the future it's functionality should be expanded
+func NewCollectionFromConfig(cfg *CollectionConfig) (Collection, error) {
+	var walks []Walk
+	for _, path := range cfg.LocalDirs {
+		rdr, err := NewCBORResourceFileReader(path)
+		if err != nil {
+			return nil, err
+		}
+		walks = append(walks, rdr)
+	}
+	return NewCollection(walks...), nil
+}
+
 // NewCollection creates a new collection from any number of walks
 func NewCollection(walks ...Walk) Collection {
 	return collection{
@@ -56,8 +71,23 @@ func (c collection) FindIndex(url string) int {
 }
 
 // Get returns a resource for a given URL
-func (c collection) Get(url string) (*Resource, error) {
-	return nil, fmt.Errorf("not finished")
+func (c collection) Get(url string, t time.Time) (r *Resource, err error) {
+	var rsc *Resource
+	for _, w := range c.walks {
+		rsc, err = w.Get(url, t)
+		if err != nil && err != ErrNotFound {
+			return
+		}
+		if r == nil || rsc.Timestamp.After(r.Timestamp) {
+			r = rsc
+		}
+	}
+
+	if r == nil {
+		err = ErrNotFound
+	}
+
+	return
 }
 
 // Timespan returns the earliest & latest dates this Walk contains

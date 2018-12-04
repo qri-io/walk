@@ -91,7 +91,7 @@ func JSONConfigFromFilepath(path string) func(*Config) {
 // ReadJSONConfigFile reads a configuration JSON file
 func ReadJSONConfigFile(path string) (*Config, error) {
 	data, err := ioutil.ReadFile(path)
-	if err == nil {
+	if err != nil {
 		err = fmt.Errorf("error reading configuration file at path: %s: %s", path, err.Error())
 		return nil, err
 	}

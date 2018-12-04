@@ -5,15 +5,12 @@ import (
 	"net/http"
 
 	"github.com/qri-io/walk/lib"
-	"github.com/sirupsen/logrus"
 )
-
-var log = logrus.New()
 
 // Server wraps an
 type Server struct {
 	collection lib.Collection
-	server *http.Server
+	server     *http.Server
 }
 
 // NewServer creates a new server
@@ -25,8 +22,8 @@ func NewServer(col lib.Collection) *Server {
 
 // Serve Blocks
 func (s *Server) Serve(port string) (err error) {
-	s.server := &http.Server{
-		Addr: fmt.Sprintf(":%s", port),
+	s.server = &http.Server{
+		Addr:    fmt.Sprintf(":%s", port),
 		Handler: NewServerRoutes(s),
 	}
 	return s.server.ListenAndServe()
@@ -43,10 +40,14 @@ func HealthCheckHandler(w http.ResponseWriter, r *http.Request) {
 func NewServerRoutes(s *Server) *http.ServeMux {
 	m := http.NewServeMux()
 
+	m.Handle("/", s.middleware(HealthCheckHandler))
 	m.Handle("/status", s.middleware(HealthCheckHandler))
-	
-	ch := CollectionHandlers(s.collection)
+
+	ch := CollectionHandlers{collection: s.collection}
 	m.Handle("/walks", s.middleware(ch.HandleListWalks))
+	m.Handle("/walks/", s.middleware(ch.HandleWalkIndex))
+	m.Handle("/captures/meta/", s.middleware(ch.HandleListMeta))
+	m.Handle("/captures/resolved/", s.middleware(ch.HandleResolvedResource))
 
 	return m
 }
