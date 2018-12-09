@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/qri-io/walk/lib"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -14,6 +15,11 @@ var log = logrus.New()
 // RootCmd is the walk command
 var RootCmd = &cobra.Command{
 	Short: "CLI tool for building sitemaps",
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		if debug, err := cmd.Flags().GetBool("debug"); err == nil && debug {
+			lib.SetLogLevel("debug")
+		}
+	},
 }
 
 // Execute adds all child commands to the root command sets flags appropriately.
@@ -27,6 +33,7 @@ func Execute() {
 
 func init() {
 	RootCmd.PersistentFlags().StringP("config", "c", "config.json", "path to configuration json file")
+	RootCmd.PersistentFlags().Bool("debug", false, "show debug output")
 	RootCmd.AddCommand(
 		StartCmd,
 		NormalizeURLCmd,

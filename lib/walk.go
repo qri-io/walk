@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -158,11 +159,17 @@ func (cr *CBORResourceFileReader) Get(url string, t time.Time) (*Resource, error
 	}
 
 	md := cr.index[idx].JSON
-	if md == nil || md["hash"] == nil {
-		return nil, fmt.Errorf("index is missing metadata")
+	if md == nil || md["url"] == nil {
+		return nil, fmt.Errorf("index is missing url metadata")
 	}
 
-	path := filepath.Join(cr.base, fmt.Sprintf("%s.cbor", md["hash"].(string)))
+	url, ok := md["url"].(string)
+	if !ok {
+		return nil, fmt.Errorf("expected meta 'url' field to be a string")
+	}
+
+	fname := base64.StdEncoding.EncodeToString([]byte(url))
+	path := filepath.Join(cr.base, fmt.Sprintf("%s.cbor", fname))
 
 	f, err := os.Open(path)
 	if err != nil {

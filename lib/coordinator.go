@@ -152,27 +152,28 @@ func (c *Coordinator) Start(stop chan bool) error {
 
 	if c.cfg.DoneScanMilli > 0 {
 		doneScanT = time.NewTicker(time.Millisecond * time.Duration(c.cfg.DoneScanMilli))
+		log.Debugf("performing done scan checks every %d secs.", c.cfg.DoneScanMilli/1000)
 		go func() {
-		CHECK:
 			for range doneScanT.C {
 				l, err := c.queue.Len()
 				if err != nil {
 					log.Errorf("error getting queue length: %s", err.Error())
-					continue CHECK
+					continue
 				}
 				if l == 0 {
 					reqs, err := c.frs.List(-1, 0)
 					if err != nil {
 						log.Errorf("error reading: %s", err.Error())
-						continue CHECK
+						continue
 					}
 					for _, r := range reqs {
 						if !(r.Status == RequestStatusDone || r.Status == RequestStatusFailed) {
-							continue CHECK
+							continue
 						}
 					}
 					log.Info("no urls remain for checking, nothing left in queue, we done")
 					stop <- true
+					return
 				}
 			}
 		}()

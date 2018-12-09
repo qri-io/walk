@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -64,6 +65,10 @@ type CBORResourceFileWriter struct {
 
 // NewCBORResourceFileWriter writes
 func NewCBORResourceFileWriter(dir string) (*CBORResourceFileWriter, error) {
+	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
+		return nil, err
+	}
+
 	f, err := os.Create(filepath.Join(dir, "index.cdxj"))
 	if err != nil {
 		return nil, err
@@ -85,12 +90,14 @@ func (rh *CBORResourceFileWriter) Type() string { return "CBOR" }
 
 // HandleResource implements the ResourceHandler interface
 func (rh *CBORResourceFileWriter) HandleResource(rsc *Resource) {
-	if rsc.Hash == "" {
-		log.Info("skipping resource, can only record resources with a hash field")
+	if rsc.URL == "" {
+		log.Info("skipping resource, can only record resources with a URL field")
 		return
 	}
 
-	f, err := os.Create(filepath.Join(rh.basePath, rsc.Hash+".cbor"))
+	fname := base64.StdEncoding.EncodeToString([]byte(rsc.URL))
+
+	f, err := os.Create(filepath.Join(rh.basePath, fname+".cbor"))
 	defer f.Close()
 	if err != nil {
 		log.Error(err.Error())
@@ -102,9 +109,17 @@ func (rh *CBORResourceFileWriter) HandleResource(rsc *Resource) {
 		log.Error(err.Error())
 	}
 
-	rec := cdxj.NewResponseRecord(rsc.URL, rsc.Timestamp, map[string]interface{}{
+	meta := map[string]interface{}{
 		"hash": rsc.Hash,
-	})
+		"size": len(rsc.Body),
+		"url":  rsc.URL,
+	}
+
+	if rsc.RedirectTo != "" {
+		meta["redirectTo"] = rsc.RedirectTo
+	}
+
+	rec := cdxj.NewResponseRecord(rsc.URL, rsc.Timestamp, meta)
 	if err := rh.index.Write(rec); err != nil {
 		log.Error(err.Error())
 	}

@@ -44,9 +44,11 @@ func NewServerRoutes(s *Server) *http.ServeMux {
 	m.Handle("/status", s.middleware(HealthCheckHandler))
 
 	ch := CollectionHandlers{collection: s.collection}
-	m.Handle("/walks", s.middleware(ch.HandleListWalks))
-	m.Handle("/walks/", s.middleware(ch.HandleWalkIndex))
-	m.Handle("/captures/meta/", s.middleware(ch.HandleListMeta))
+	m.Handle("/collection", s.middleware(ch.HandleListWalks))
+	m.Handle("/collection/", s.middleware(ch.HandleWalkIndex))
+	m.Handle("/captures/meta/raw/", s.middleware(ch.HandleRawResourceMeta))
+	m.Handle("/captures/meta/resolved/", s.middleware(ch.HandleResolvedResourceMeta))
+	m.Handle("/captures/raw/", s.middleware(ch.HandleRawResource))
 	m.Handle("/captures/resolved/", s.middleware(ch.HandleResolvedResource))
 
 	return m

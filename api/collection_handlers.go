@@ -48,8 +48,9 @@ func (h *CollectionHandlers) getWalk(id string, w http.ResponseWriter, r *http.R
 	return nil
 }
 
+// HandleWalkIndex lists walks contained in the collection
 func (h *CollectionHandlers) HandleWalkIndex(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Path[len("/walks/"):]
+	id := r.URL.Path[len("/collection/"):]
 	w.Header().Set("content-type", "application/json")
 
 	if walk := h.getWalk(id, w, r); walk != nil {
@@ -62,40 +63,60 @@ func (h *CollectionHandlers) HandleWalkIndex(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-func (h *CollectionHandlers) HandleListMeta(w http.ResponseWriter, r *http.Request) {
-	// id := r.URL.Path[len("/meta/"):]
-	// TODO (b5): FINISH
-	_, _, err := pathTimestampURL("/captures/meta/", r.URL.Path)
+// HandleRawResourceMeta gives raw meta information for a capture
+func (h *CollectionHandlers) HandleRawResourceMeta(w http.ResponseWriter, r *http.Request) {
+	t, url, err := pathTimestampURL("/captures/meta/raw/", r.URL.Path)
+	if err != nil {
+		apiutil.WriteErrResponse(w, http.StatusBadRequest, err)
+		return
+	}
+	w.Header().Set("content-type", "application/json")
+
+	rsc, err := h.collection.Get(url, t)
+	if err != nil {
+		apiutil.WriteErrResponse(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	apiutil.WriteResponse(w, rsc.Meta())
+}
+
+// HandleResolvedResourceMeta gives resolved meta information
+func (h *CollectionHandlers) HandleResolvedResourceMeta(w http.ResponseWriter, r *http.Request) {
+	t, url, err := pathTimestampURL("/captures/meta/resolved/", r.URL.Path)
+	if err != nil {
+		apiutil.WriteErrResponse(w, http.StatusBadRequest, err)
+		return
+	}
+	w.Header().Set("content-type", "application/json")
+
+	rsc, err := h.resolvedResource(t, url)
+	if err != nil {
+		apiutil.WriteErrResponse(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	apiutil.WriteResponse(w, rsc.Meta())
+}
+
+// HandleRawResource returns the raw response for a given URL
+func (h *CollectionHandlers) HandleRawResource(w http.ResponseWriter, r *http.Request) {
+	t, url, err := pathTimestampURL("/captures/raw/", r.URL.Path)
 	if err != nil {
 		apiutil.WriteErrResponse(w, http.StatusBadRequest, err)
 		return
 	}
 
-	w.Header().Set("content-type", "application/json")
+	rsc, err := h.collection.Get(url, t)
+	if err != nil {
+		apiutil.WriteErrResponse(w, http.StatusInternalServerError, err)
+		return
+	}
 
-	// if walk := h.getWalk(id, w, r); walk != nil {
-	// 	page := apiutil.PageFromRequest(r)
-	// 	rscs, err := walk.SortedIndex(page.Limit(), page.Offset())
-	// 	if err != nil {
-	// 		apiutil.WriteErrResponse(w, http.StatusInternalServerError, err)
-	// 		return
-	// 	}
-
-	// 	var res []*lib.Resource
-	// 	for _, c := range rscs {
-	// 		rsc, err := walk.Get(c.URL, time.Time{})
-	// 		if err != nil {
-	// 			panic(err)
-	// 		}
-	// 		rsc.Body = nil
-	// 		res = append(res, rsc)
-	// 	}
-
-	// 	apiutil.WritePageResponse(w, res, r, page)
-	// 	return
-	// }
+	w.Write(rsc.Body)
 }
 
+// HandleResolvedResource fetches a resource, following any redirects
 func (h *CollectionHandlers) HandleResolvedResource(w http.ResponseWriter, r *http.Request) {
 	t, url, err := pathTimestampURL("/captures/resolved/", r.URL.Path)
 	if err != nil {
@@ -103,19 +124,38 @@ func (h *CollectionHandlers) HandleResolvedResource(w http.ResponseWriter, r *ht
 		return
 	}
 
-	walks, err := h.collection.Walks()
-	if err != nil {
-		apiutil.WriteErrResponse(w, http.StatusInternalServerError, err)
-		return
-	}
-
-	rsc, err := walks[0].Get(url, t)
+	rsc, err := h.resolvedResource(t, url)
 	if err != nil {
 		apiutil.WriteErrResponse(w, http.StatusInternalServerError, err)
 		return
 	}
 
 	w.Write(rsc.Body)
+}
+
+// maximum number of redirects a resource will follow when resolving
+// TODO (b5): make this configurable
+const maxRedirects = 20
+
+func (h *CollectionHandlers) resolvedResource(t time.Time, url string) (rsc *lib.Resource, err error) {
+	redirects := 0
+	for {
+		if rsc, err = h.collection.Get(url, t); err != nil {
+			return
+		}
+		if rsc.RedirectTo != "" {
+			url = rsc.RedirectTo
+			redirects++
+			if redirects == maxRedirects {
+				err = fmt.Errorf("max %d redirects exceeded", maxRedirects)
+				return
+			}
+			continue
+		}
+		break
+	}
+
+	return
 }
 
 func pathTimestampURL(prefix, path string) (t time.Time, url string, err error) {
@@ -125,8 +165,16 @@ func pathTimestampURL(prefix, path string) (t time.Time, url string, err error) 
 		err = fmt.Errorf("invalid {timestamp}/{url} combination")
 		return
 	}
-	if t, err = time.Parse(time.RFC3339, split[0]); err != nil {
-		return
+
+	switch split[0] {
+	case "now":
+		t = time.Now()
+	case "zero":
+		t = time.Time{}
+	default:
+		if t, err = time.Parse(time.RFC3339, split[0]); err != nil {
+			return
+		}
 	}
 
 	url = split[1]

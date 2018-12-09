@@ -62,6 +62,25 @@ func (u *Resource) HeadersMap() (headers map[string]string) {
 	return
 }
 
+// Meta returns a shallow copy of the resource without body bytes
+func (u *Resource) Meta() *Resource {
+	return &Resource{
+		URL:             u.URL,
+		Timestamp:       u.Timestamp,
+		RequestDuration: u.RequestDuration,
+		Status:          u.Status,
+		ContentType:     u.ContentType,
+		ContentSniff:    u.ContentSniff,
+		ContentLength:   u.ContentLength,
+		Title:           u.Title,
+		Headers:         u.Headers,
+		Hash:            u.Hash,
+		Links:           u.Links,
+		RedirectTo:      u.RedirectTo,
+		Error:           u.Error,
+	}
+}
+
 // HandleResponse populates a resource based on an HTTP response
 func (u *Resource) HandleResponse(started time.Time, res *http.Response, recordHeaders bool) (err error) {
 	var doc *goquery.Document
