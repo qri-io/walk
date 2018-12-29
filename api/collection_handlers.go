@@ -17,17 +17,28 @@ type CollectionHandlers struct {
 
 // HandleListWalks lists the walks connected to a collection
 func (h *CollectionHandlers) HandleListWalks(w http.ResponseWriter, r *http.Request) {
-	var res []string
 	walks, err := h.collection.Walks()
 	if err != nil {
 		apiutil.WriteErrResponse(w, http.StatusInternalServerError, err)
 		return
 	}
 
-	for _, walk := range walks {
-		res = append(res, walk.ID())
+	p := apiutil.PageFromRequest(r)
+	res := make([]string, p.Size)
+	idx := 0
+	for i, walk := range walks {
+		if i < p.Offset() {
+			continue
+		}
+		res[idx] = walk.ID()
+		idx++
+		if idx == p.Size {
+			break
+		}
 	}
-	w.Header().Set("content-type", "application/json")
+	res = res[:idx]
+
+	w.Header().Set("Content-Type", "application/json")
 	apiutil.WriteResponse(w, res)
 }
 
@@ -44,23 +55,26 @@ func (h *CollectionHandlers) getWalk(id string, w http.ResponseWriter, r *http.R
 		}
 	}
 
-	apiutil.NotFoundHandler(w, r)
 	return nil
 }
 
 // HandleWalkIndex lists walks contained in the collection
 func (h *CollectionHandlers) HandleWalkIndex(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Path[len("/collection/"):]
-	w.Header().Set("content-type", "application/json")
+	w.Header().Set("Content-Type", "application/json")
+	page := apiutil.PageFromRequest(r)
 
 	if walk := h.getWalk(id, w, r); walk != nil {
-		rsc, err := walk.SortedIndex(10000000, 0)
+		rsc, err := walk.SortedIndex(page.Limit(), page.Offset())
 		if err != nil {
 			apiutil.WriteErrResponse(w, http.StatusInternalServerError, err)
 			return
 		}
 		apiutil.WriteResponse(w, rsc)
+		return
 	}
+
+	writeNotFound(w)
 }
 
 // HandleRawResourceMeta gives raw meta information for a capture
@@ -70,7 +84,7 @@ func (h *CollectionHandlers) HandleRawResourceMeta(w http.ResponseWriter, r *htt
 		apiutil.WriteErrResponse(w, http.StatusBadRequest, err)
 		return
 	}
-	w.Header().Set("content-type", "application/json")
+	w.Header().Set("Content-Type", "application/json")
 
 	rsc, err := h.collection.Get(url, t)
 	if err != nil {
@@ -88,7 +102,7 @@ func (h *CollectionHandlers) HandleResolvedResourceMeta(w http.ResponseWriter, r
 		apiutil.WriteErrResponse(w, http.StatusBadRequest, err)
 		return
 	}
-	w.Header().Set("content-type", "application/json")
+	w.Header().Set("Content-Type", "application/json")
 
 	rsc, err := h.resolvedResource(t, url)
 	if err != nil {
@@ -160,6 +174,11 @@ func (h *CollectionHandlers) resolvedResource(t time.Time, url string) (rsc *lib
 
 func pathTimestampURL(prefix, path string) (t time.Time, url string, err error) {
 	p := strings.TrimPrefix(path, prefix)
+	if p == "/" || p == "" {
+		err = fmt.Errorf("not found")
+		return
+	}
+
 	split := strings.SplitN(p, "/", 2)
 	if len(split) != 2 {
 		err = fmt.Errorf("invalid {timestamp}/{url} combination")
@@ -178,5 +197,7 @@ func pathTimestampURL(prefix, path string) (t time.Time, url string, err error) 
 	}
 
 	url = split[1]
+	url = strings.TrimPrefix(url, "https://")
+	url = strings.TrimPrefix(url, "http://")
 	return
 }
