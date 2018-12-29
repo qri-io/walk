@@ -77,6 +77,20 @@ func (h *CollectionHandlers) HandleWalkIndex(w http.ResponseWriter, r *http.Requ
 	writeNotFound(w)
 }
 
+// HandleCollectionIndex lists urls in the entire collection
+func (h *CollectionHandlers) HandleCollectionIndex(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	page := apiutil.PageFromRequest(r)
+
+	rsc, err := h.collection.SortedIndex(page.Limit(), page.Offset())
+	if err != nil {
+		apiutil.WriteErrResponse(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	apiutil.WriteResponse(w, rsc)
+}
+
 // HandleRawResourceMeta gives raw meta information for a capture
 func (h *CollectionHandlers) HandleRawResourceMeta(w http.ResponseWriter, r *http.Request) {
 	t, url, err := pathTimestampURL("/captures/meta/raw/", r.URL.Path)
@@ -197,7 +211,8 @@ func pathTimestampURL(prefix, path string) (t time.Time, url string, err error) 
 	}
 
 	url = split[1]
-	url = strings.TrimPrefix(url, "https://")
-	url = strings.TrimPrefix(url, "http://")
+	if url == "" {
+		err = fmt.Errorf("invalid {timestamp}/{url} combination")
+	}
 	return
 }

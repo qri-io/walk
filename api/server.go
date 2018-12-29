@@ -59,6 +59,8 @@ func NewServerRoutes(s *Server) *http.ServeMux {
 	ch := CollectionHandlers{collection: s.collection}
 	m.Handle("/collection", s.middleware(ch.HandleListWalks))
 	m.Handle("/collection/", s.middleware(ch.HandleWalkIndex))
+	m.Handle("/captures", s.middleware(ch.HandleCollectionIndex))
+	m.Handle("/captures/", s.middleware(ch.HandleCollectionIndex))
 	m.Handle("/captures/meta/raw/", s.middleware(ch.HandleRawResourceMeta))
 	m.Handle("/captures/meta/resolved/", s.middleware(ch.HandleResolvedResourceMeta))
 	m.Handle("/captures/raw/", s.middleware(ch.HandleRawResource))
