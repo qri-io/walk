@@ -9,8 +9,7 @@ import (
 	"github.com/PuerkitoBio/fetchbot"
 )
 
-// Worker is the interface turning Requests into Resources
-// by performing fetches
+// Worker is the interface turning Requests into Resources by performing fetches
 type Worker interface {
 	SetDelay(time.Duration)
 	Start(coord WorkCoordinator) error
@@ -105,6 +104,7 @@ func (w *LocalWorker) Start(coord WorkCoordinator) error {
 					continue
 				}
 				i = (i + 1) % len(w.queues)
+				time.Sleep(time.Duration(w.cfg.DelayMilli) * time.Millisecond)
 			case <-w.stop:
 				for _, q := range w.queues {
 					q.Close()

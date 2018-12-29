@@ -136,8 +136,9 @@ func (c *Coordinator) ResourceHandlers() []ResourceHandler {
 // Start kicks off coordinated fetching, seeding the queue & store & awaiting responses
 // start will block until a signal is received on the stop channel, keep in mind
 // a number of conditions can stop the crawler depending on configuration
-func (c *Coordinator) Start(stop chan bool) error {
+func (c *Coordinator) Start(stop chan bool) (err error) {
 	var (
+		seedr                           io.Reader
 		unfetchedT, backoffT, doneScanT *time.Ticker
 		finalizerErrs                   []error
 		wg                              sync.WaitGroup
@@ -153,6 +154,10 @@ func (c *Coordinator) Start(stop chan bool) error {
 				}
 			}
 		}()
+	}
+
+	if seedr, err = c.enqueSeedsPath(); err != nil {
+		return fmt.Errorf("getting SeedsPath: %s", err.Error())
 	}
 
 	if c.cfg.DoneScanMilli > 0 {
@@ -186,7 +191,14 @@ func (c *Coordinator) Start(stop chan bool) error {
 
 	c.start = time.Now()
 
-	go c.enqueSeedsPath()
+	if seedr != nil {
+		go func(s *bufio.Scanner) {
+			for s.Scan() {
+				c.enqueue(&Request{URL: s.Text()})
+			}
+		}(bufio.NewScanner(seedr))
+	}
+
 	for _, url := range c.cfg.Seeds {
 		c.enqueue(&Request{URL: url})
 	}
@@ -228,38 +240,31 @@ func (c *Coordinator) Start(stop chan bool) error {
 	return nil
 }
 
-func (c *Coordinator) enqueSeedsPath() {
+func (c *Coordinator) enqueSeedsPath() (r io.Reader, err error) {
 	if c.cfg.SeedsPath == "" {
-		return
+		return nil, nil
 	}
-	var rdr io.Reader
+
 	if _, err := url.ParseRequestURI(c.cfg.SeedsPath); err == nil {
+		log.Info("fetching SeedsPath URL")
 		res, err := http.Get(c.cfg.SeedsPath)
 		if err != nil {
-			log.Error(err)
-			return
+			return nil, err
 		}
 		data, err := ioutil.ReadAll(res.Body)
 		if err != nil {
-			log.Error(err)
-			return
+			return nil, err
 		}
 		res.Body.Close()
-		rdr = bytes.NewBuffer(data)
-	} else {
-		data, err := ioutil.ReadFile(c.cfg.SeedsPath)
-		if err != nil {
-			log.Error(err)
-			return
-		}
-		rdr = bytes.NewBuffer(data)
+		return bytes.NewBuffer(data), nil
 	}
 
-	s := bufio.NewScanner(rdr)
-	for s.Scan() {
-		c.enqueue(&Request{URL: s.Text()})
+	log.Info("reading SeedsPath file")
+	data, err := ioutil.ReadFile(c.cfg.SeedsPath)
+	if err != nil {
+		return nil, err
 	}
-	log.Info("finished enqueing configured seeds path seeds")
+	return bytes.NewBuffer(data), nil
 }
 
 // Queue gives access to the underlying queue as a channel of Fetch Requests
