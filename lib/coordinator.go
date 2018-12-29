@@ -1,7 +1,12 @@
 package lib
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -180,6 +185,8 @@ func (c *Coordinator) Start(stop chan bool) error {
 	}
 
 	c.start = time.Now()
+
+	go c.enqueSeedsPath()
 	for _, url := range c.cfg.Seeds {
 		c.enqueue(&Request{URL: url})
 	}
@@ -219,6 +226,40 @@ func (c *Coordinator) Start(stop chan bool) error {
 	}
 
 	return nil
+}
+
+func (c *Coordinator) enqueSeedsPath() {
+	if c.cfg.SeedsPath == "" {
+		return
+	}
+	var rdr io.Reader
+	if _, err := url.ParseRequestURI(c.cfg.SeedsPath); err == nil {
+		res, err := http.Get(c.cfg.SeedsPath)
+		if err != nil {
+			log.Error(err)
+			return
+		}
+		data, err := ioutil.ReadAll(res.Body)
+		if err != nil {
+			log.Error(err)
+			return
+		}
+		res.Body.Close()
+		rdr = bytes.NewBuffer(data)
+	} else {
+		data, err := ioutil.ReadFile(c.cfg.SeedsPath)
+		if err != nil {
+			log.Error(err)
+			return
+		}
+		rdr = bytes.NewBuffer(data)
+	}
+
+	s := bufio.NewScanner(rdr)
+	for s.Scan() {
+		c.enqueue(&Request{URL: s.Text()})
+	}
+	log.Info("finished enqueing configured seeds path seeds")
 }
 
 // Queue gives access to the underlying queue as a channel of Fetch Requests

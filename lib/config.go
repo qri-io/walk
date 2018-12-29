@@ -108,6 +108,8 @@ func ReadJSONConfigFile(path string) (*Config, error) {
 type CoordinatorConfig struct {
 	// Seeds is a list of urls to seed the crawler with
 	Seeds []string
+	// SeedsPath is a filepath or URL to a newline-delimited list of seed URL strings
+	SeedsPath string
 	// If true, links from completed resources returned to the coordinator will
 	// be added to the queue (aka, crawling). Only links within the domains list
 	// that don't match ignore patterns will be crawled
