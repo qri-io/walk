@@ -5,7 +5,7 @@ GOPACKAGES = github.com/datatogether/ffi github.com/multiformats/go-multihash gi
 default: build
 
 require-gopath:
-	ifndef $GOPATH
+	ifndef GOPATH
 		$(error $$GOPATH must be set. plz check: https://github.com/golang/go/wiki/SettingGOPATH)
 	endif
 
