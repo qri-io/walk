@@ -11,6 +11,16 @@ Walk is a system for scraping a BIG list of URLs (or a whole host/origin) and pr
 
 (System components are in square-edged boxes, while the format of data being sent between them is in round-edged boxes. Open questions highlighted in green.)
 
+### Building From Source
+
+To build walk you'll need the [go programming language](https://golang.org) on your machine.
+
+```shell
+$ go get github.com/qri-io/walk
+$ cd $GOPATH/src/github.com/qri-io/walk
+$ make install
+```
+
 ---
 
 * NDJSON (nweline delimited JSON)
