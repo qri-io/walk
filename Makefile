@@ -5,7 +5,7 @@ GOPACKAGES = github.com/datatogether/ffi github.com/multiformats/go-multihash gi
 default: build
 
 require-gopath:
-	ifndef GOPATH
+	ifndef $GOPATH
 		$(error $$GOPATH must be set. plz check: https://github.com/golang/go/wiki/SettingGOPATH)
 	endif
 
@@ -17,3 +17,11 @@ list-deps:
 
 build:
 	go build
+
+install: 
+	@echo "\n1/2 install deps:\n"
+	go get -v -u $(GOPACKAGES)
+	@echo "\n2/2 build & install walk:\n"
+	go install
+	@echo "done!"
+
