@@ -17,3 +17,11 @@ list-deps:
 
 build:
 	go build
+
+install: 
+	@echo "\n1/2 install deps:\n"
+	go get -v -u $(GOPACKAGES)
+	@echo "\n2/2 build & install walk:\n"
+	go install
+	@echo "done!"
+
