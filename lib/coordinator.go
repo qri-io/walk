@@ -404,5 +404,5 @@ func (c *Coordinator) urlStringIsCandidate(rawurl string) bool {
 }
 
 func (c *Coordinator) okResponseStatus(s int) bool {
-	return s == 200
+	return s >= http.StatusOK && s <= http.StatusPermanentRedirect
 }
