@@ -8,6 +8,7 @@ import (
 // Fetching (request the URL & recording the response) Requests are
 // held in stores, placed in queues, and consumed by workers
 type Request struct {
+	JobID  string
 	URL    string
 	Status RequestStatus
 	// TODO - currently not in use

@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +31,8 @@ type WorkCoordinator interface {
 // completed work back to the coordinator, which sends the created resources to any
 // registered resource handlers
 type Coordinator struct {
+	// id for this crawl
+	jobID string
 	// time crawler started
 	start time.Time
 	// how many urls have been fetched and written to urls
@@ -58,6 +61,10 @@ type Coordinator struct {
 	finished int
 }
 
+func newJobID() string {
+	return strconv.Itoa(1)
+}
+
 // NewWalkJob creates a new walk write process from a given set of configurations
 // if no configuration is provided, the default is used
 // start the walk by calling Start on the returned coordinator
@@ -65,6 +72,8 @@ type Coordinator struct {
 func NewWalkJob(configs ...func(*Config)) (coord *Coordinator, stop chan bool, err error) {
 	// combine configurations with default
 	cfg := ApplyConfigs(configs...)
+
+	jobID := newJobID()
 
 	// create queue, store, workers, and handlers
 	// TODO - needs to leverage config
@@ -81,7 +90,7 @@ func NewWalkJob(configs ...func(*Config)) (coord *Coordinator, stop chan bool, e
 	}
 
 	// create coodinator
-	coord = NewCoordinator(cfg.Coordinator, queue, frs, hs)
+	coord = NewCoordinator(jobID, cfg.Coordinator, queue, frs, hs)
 	stop = make(chan bool)
 
 	// start workers
@@ -98,8 +107,9 @@ func (c *Coordinator) Config() *CoordinatorConfig {
 }
 
 // NewCoordinator creates a Coordinator
-func NewCoordinator(cfg *CoordinatorConfig, q Queue, frs RequestStore, rh []ResourceHandler) *Coordinator {
+func NewCoordinator(jobID string, cfg *CoordinatorConfig, q Queue, frs RequestStore, rh []ResourceHandler) *Coordinator {
 	c := &Coordinator{
+		jobID:      jobID,
 		cfg:        cfg,
 		queue:      q,
 		frs:        frs,
@@ -324,6 +334,7 @@ func (c *Coordinator) Completed(rsc ...*Resource) error {
 
 func (c *Coordinator) enqueue(rs ...*Request) {
 	for _, r := range rs {
+		r.JobID = c.jobID
 		if c.stopping {
 			r.Status = RequestStatusFailed
 			c.frs.Put(r)

@@ -23,6 +23,8 @@ func TestCoordinatorNoRequeue(t *testing.T) {
 	s := tc.Server()
 	cfg := ApplyConfigs(tc.Config(s))
 
+	jobID := newJobID()
+
 	queue := NewMemQueue()
 	queue.OnPush = func(r *Request) {
 		reqs[r.URL]++
@@ -36,7 +38,7 @@ func TestCoordinatorNoRequeue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err.Error())
 	}
-	coord := NewCoordinator(cfg.Coordinator, queue, frs, nil)
+	coord := NewCoordinator(jobID, cfg.Coordinator, queue, frs, nil)
 	stop := make(chan bool)
 
 	// start workers
@@ -56,6 +58,8 @@ func TestCoordinatorNoCrawl(t *testing.T) {
 		c.Coordinator.Crawl = false
 	})
 
+	jobID := newJobID()
+
 	queue := NewMemQueue()
 	queue.OnPush = func(r *Request) {
 		reqs[r.URL]++
@@ -69,7 +73,7 @@ func TestCoordinatorNoCrawl(t *testing.T) {
 	if err != nil {
 		t.Fatal(err.Error())
 	}
-	coord := NewCoordinator(cfg.Coordinator, queue, frs, nil)
+	coord := NewCoordinator(jobID, cfg.Coordinator, queue, frs, nil)
 	stop := make(chan bool)
 
 	// start workers

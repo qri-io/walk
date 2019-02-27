@@ -69,6 +69,7 @@ func (u *Resource) HeadersMap() (headers map[string]string) {
 // Meta returns a shallow copy of the resource without body bytes
 func (u *Resource) Meta() *Resource {
 	return &Resource{
+		JobID:           u.JobID,
 		URL:             u.URL,
 		Timestamp:       u.Timestamp,
 		RequestDuration: u.RequestDuration,

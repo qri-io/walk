@@ -94,7 +94,7 @@ func (w *LocalWorker) Start(coord WorkCoordinator) error {
 		for {
 			select {
 			case fr := <-ch:
-				tg, err := NewTimedGet(fr.URL)
+				tg, err := NewTimedGet(fr.JobID, fr.URL)
 				if err != nil {
 					log.Error(err.Error())
 					continue
@@ -156,6 +156,7 @@ func newMux(coord WorkCoordinator, recordRedirects, recordHeaders bool) *fetchbo
 
 			var st time.Time
 			if timedCmd, ok := ctx.Cmd.(*TimedCmd); ok {
+				r.JobID = timedCmd.JobID
 				st = timedCmd.Started
 			}
 
@@ -223,20 +224,22 @@ func NewRecordRedirectClient(wc WorkCoordinator) *http.Client {
 // TimedCmd defines a Command implementation that sets an internal timestamp
 // whenever it's URL method is called
 type TimedCmd struct {
+	JobID   string
 	U       *url.URL
 	M       string
 	Started time.Time
 }
 
 // NewTimedGet creates a new GET command with an internal Timer
-func NewTimedGet(rawurl string) (*TimedCmd, error) {
+func NewTimedGet(jobID, rawurl string) (*TimedCmd, error) {
 	u, err := url.Parse(rawurl)
 	if err != nil {
 		return nil, err
 	}
 	return &TimedCmd{
-		U: u,
-		M: "GET",
+		JobID: jobID,
+		U:     u,
+		M:     "GET",
 	}, nil
 }
 

@@ -166,6 +166,9 @@ func (rh *CBORResourceFileWriter) HandleResource(rsc *Resource) {
 	if rsc.RedirectFrom != "" {
 		record["redirectFrom"] = rsc.RedirectFrom
 	}
+	if rsc.JobID != "" {
+		record["jobID"] = rsc.JobID
+	}
 
 	rec := cdxj.NewResponseRecord(rsc.URL, rsc.Timestamp, record)
 	if err := rh.index.Write(rec); err != nil {
