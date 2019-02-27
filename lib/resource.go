@@ -45,6 +45,8 @@ type Resource struct {
 	Links []string `json:"links,omitempty"`
 	// RedirectTo speficies where this url redirects to, cannonicalized
 	RedirectTo string `json:"redirectTo,omitempty"`
+	// RedirectTo speficies where this url redirects from, cannonicalized
+	RedirectFrom string `json:"redirectFrom,omitempty"`
 	// Error contains any fetching error string
 	Error string `json:"error,omitempty"`
 	// contents of response body

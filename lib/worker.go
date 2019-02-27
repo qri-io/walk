@@ -141,9 +141,15 @@ func newMux(coord WorkCoordinator, recordRedirects, recordHeaders bool) *fetchbo
 
 			r := &Resource{URL: ctx.Cmd.URL().String()}
 
-			// TODO - huh? why this here? figure out & make a note
+			// when recording redirects we need to fetch the url from a different location thanks to the way
+			// our custom HandleRedirectClient works
 			if recordRedirects {
 				r = &Resource{URL: NormalizeURL(res.Request.URL)}
+
+				// if this was redirected from somewhere, record where
+				if res.Request.Response != nil && res.Request.Response.Request != nil {
+					r.RedirectFrom = NormalizeURL(res.Request.Response.Request.URL)
+				}
 			}
 
 			log.Infof("[%d] %s %s", res.StatusCode, ctx.Cmd.Method(), r.URL)
@@ -198,9 +204,10 @@ func NewRecordRedirectClient(wc WorkCoordinator) *http.Client {
 				log.Infof("[%d] %s %s -> %s", req.Response.StatusCode, prev.Method, prevurl, canurlstr)
 
 				wc.Completed(&Resource{
-					URL:        prevurl,
-					Timestamp:  time.Now(),
-					Status:     req.Response.StatusCode,
+					URL:       prevurl,
+					Timestamp: time.Now(),
+					Status:    req.Response.StatusCode,
+					// RedirectFrom: prevurl,
 					RedirectTo: canurlstr,
 				})
 			}

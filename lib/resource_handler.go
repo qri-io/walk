@@ -41,6 +41,8 @@ func NewResourceHandlers(cfg *Config) (rhs []ResourceHandler, err error) {
 // NewResourceHandler creates a ResourceHandler from a config
 func NewResourceHandler(c *Config, cfg *ResourceHandlerConfig) (ResourceHandler, error) {
 	switch strings.ToUpper(cfg.Type) {
+	case "MEM":
+		return &MemResourceHandler{}, nil
 	case "CBOR":
 		return NewCBORResourceFileWriter(cfg.DestPath)
 	case "SITEMAP":
@@ -129,3 +131,21 @@ func (rh *CBORResourceFileWriter) HandleResource(rsc *Resource) {
 func (rh *CBORResourceFileWriter) FinalizeResources() error {
 	return rh.index.Close()
 }
+
+// MemResourceHandler is an in-memory resource handler, it keeps
+// resources in a simple slice
+type MemResourceHandler struct {
+	Resources []*Resource
+}
+
+// Type returns the type of handler
+func (m *MemResourceHandler) Type() string { return "MEM" }
+
+// HandleResource stores the resource in memory
+func (m *MemResourceHandler) HandleResource(r *Resource) {
+	m.Resources = append(m.Resources, r)
+}
+
+// FinalizeResources just makes sure MemResourceHandler gets to write down any final
+// URLS before the Coordinator quits
+func (m *MemResourceHandler) FinalizeResources() error { return nil }

@@ -50,6 +50,8 @@ type Coordinator struct {
 	// if Backoff is enabled this can get higher than cfg.CrawlDelayMilliseconds
 	crawlDelay time.Duration
 
+	// unexported channel to send stop signal on
+	stop chan bool
 	// flag indicating crawler is stopping
 	stopping bool
 	// finished is a count of the total number of urls finished
@@ -143,6 +145,7 @@ func (c *Coordinator) Start(stop chan bool) (err error) {
 		finalizerErrs                   []error
 		wg                              sync.WaitGroup
 	)
+	c.stop = stop
 
 	if len(c.cfg.BackoffResponseCodes) > 0 {
 		backoffT = time.NewTicker(time.Minute)
@@ -182,7 +185,7 @@ func (c *Coordinator) Start(stop chan bool) (err error) {
 						}
 					}
 					log.Info("no urls remain for checking, nothing left in queue, we done")
-					stop <- true
+					c.stop <- true
 					return
 				}
 			}
@@ -204,7 +207,7 @@ func (c *Coordinator) Start(stop chan bool) (err error) {
 	}
 
 	// block until receive on stop
-	<-stop
+	<-c.stop
 
 	// TODO - send stop signal to workers
 
@@ -354,6 +357,14 @@ func (c *Coordinator) dequeue(rsc *Resource) error {
 		// send completed records to each handler
 		for _, h := range c.handlers {
 			go h.HandleResource(rsc)
+		}
+		if c.cfg.StopURL == fr.URL {
+			log.Infof("stop url encountered, stopping")
+			// TODO (b5): horrible hack to make sure local tests pass b/c too much parallelism
+			// should cleanup & use a channel to wait for handle resources goroutines above
+			// to finish
+			time.Sleep(time.Millisecond * 100)
+			c.stop <- true
 		}
 		return nil
 	}
