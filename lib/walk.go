@@ -151,6 +151,18 @@ func (cr *CBORResourceFileReader) SortedIndex(limit, offset int) (rsc []*Resourc
 	return rsc, nil
 }
 
+func (cr *CBORResourceFileReader) metaPath(url string) (path string) {
+	b64url := base64.StdEncoding.EncodeToString([]byte(url))
+	return filepath.Join(cr.base, "meta", b64url[:12], b64url[12:])
+}
+
+func (cr *CBORResourceFileReader) bodyPath(hash string) (path string) {
+	if len(hash) < 2 {
+		return ""
+	}
+	return filepath.Join(cr.base, "body", hash[:2], hash[2:])
+}
+
 // Get grabs an individual resource from the Walk
 func (cr *CBORResourceFileReader) Get(url string, t time.Time) (*Resource, error) {
 	idx := cr.FindIndex(url)
@@ -168,16 +180,32 @@ func (cr *CBORResourceFileReader) Get(url string, t time.Time) (*Resource, error
 		return nil, fmt.Errorf("expected meta 'url' field to be a string")
 	}
 
-	fname := base64.StdEncoding.EncodeToString([]byte(url))
-	path := filepath.Join(cr.base, fmt.Sprintf("%s.cbor", fname))
-
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
+	hash, ok := md["hash"].(string)
+	if !ok {
+		return nil, fmt.Errorf("expected meta 'hash' field to be a string")
 	}
 
 	rsc := &Resource{}
-	err = codec.NewDecoder(f, cr.handle).Decode(rsc)
+
+	// fname := base64.StdEncoding.EncodeToString([]byte(url))
+	// path := filepath.Join(cr.base, fmt.Sprintf("%s.cbor", fname))
+	metaFile, err := os.Open(cr.metaPath(url))
+	if err != nil {
+		return nil, err
+	}
+	defer metaFile.Close()
+
+	if err = codec.NewDecoder(metaFile, cr.handle).Decode(rsc); err != nil {
+		return rsc, err
+	}
+
+	bodyFile, err := os.Open(cr.bodyPath(hash))
+	if err != nil {
+		return nil, err
+	}
+	defer bodyFile.Close()
+
+	err = codec.NewDecoder(bodyFile, cr.handle).Decode(&rsc.Body)
 	return rsc, err
 }
 

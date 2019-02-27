@@ -70,6 +70,12 @@ func NewCBORResourceFileWriter(dir string) (*CBORResourceFileWriter, error) {
 	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
 		return nil, err
 	}
+	if err := os.MkdirAll(dir+"/meta", os.ModePerm); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dir+"/body", os.ModePerm); err != nil {
+		return nil, err
+	}
 
 	f, err := os.Create(filepath.Join(dir, "index.cdxj"))
 	if err != nil {
@@ -90,6 +96,15 @@ func NewCBORResourceFileWriter(dir string) (*CBORResourceFileWriter, error) {
 // Type implements ResourceHandler, distinguishing this RH as "CBOR" type
 func (rh *CBORResourceFileWriter) Type() string { return "CBOR" }
 
+func (rh *CBORResourceFileWriter) metaPath(url string) (path string) {
+	b64url := base64.StdEncoding.EncodeToString([]byte(url))
+	return filepath.Join(rh.basePath, "meta", b64url[:12], b64url[12:])
+}
+
+func (rh *CBORResourceFileWriter) bodyPath(hash string) (path string) {
+	return filepath.Join(rh.basePath, "body", hash[:2], hash[2:])
+}
+
 // HandleResource implements the ResourceHandler interface
 func (rh *CBORResourceFileWriter) HandleResource(rsc *Resource) {
 	if rsc.URL == "" {
@@ -97,31 +112,62 @@ func (rh *CBORResourceFileWriter) HandleResource(rsc *Resource) {
 		return
 	}
 
-	fname := base64.StdEncoding.EncodeToString([]byte(rsc.URL))
-
-	f, err := os.Create(filepath.Join(rh.basePath, fname+".cbor"))
-	defer f.Close()
-	if err != nil {
+	// write meta file
+	metaPath := rh.metaPath(rsc.URL)
+	if err := os.MkdirAll(filepath.Dir(metaPath), os.ModePerm); err != nil {
 		log.Error(err.Error())
 		return
 	}
 
-	enc := codec.NewEncoder(f, rh.handle)
-	if err := enc.Encode(rsc); err != nil {
+	meta, err := os.Create(metaPath)
+	if err != nil {
 		log.Error(err.Error())
+		return
+	}
+	defer meta.Close()
+
+	metaEnc := codec.NewEncoder(meta, rh.handle)
+	if err := metaEnc.Encode(rsc.Meta()); err != nil {
+		log.Error(err.Error())
+		return
 	}
 
-	meta := map[string]interface{}{
+	// write body file to body/hash[:2]/hash[2:].cbor
+	if len(rsc.Hash) > 2 {
+		path := rh.bodyPath(rsc.Hash)
+		if err := os.MkdirAll(filepath.Dir(path), os.ModePerm); err != nil {
+			log.Error(err.Error())
+			return
+		}
+
+		body, err := os.Create(path)
+		if err != nil {
+			log.Error(err.Error())
+			return
+		}
+		defer body.Close()
+
+		bodyEnc := codec.NewEncoder(body, rh.handle)
+		if err := bodyEnc.Encode(rsc.Body); err != nil {
+			log.Error(err.Error())
+		}
+
+	}
+
+	record := map[string]interface{}{
 		"hash": rsc.Hash,
 		"size": len(rsc.Body),
 		"url":  rsc.URL,
 	}
 
 	if rsc.RedirectTo != "" {
-		meta["redirectTo"] = rsc.RedirectTo
+		record["redirectTo"] = rsc.RedirectTo
+	}
+	if rsc.RedirectFrom != "" {
+		record["redirectFrom"] = rsc.RedirectFrom
 	}
 
-	rec := cdxj.NewResponseRecord(rsc.URL, rsc.Timestamp, meta)
+	rec := cdxj.NewResponseRecord(rsc.URL, rsc.Timestamp, record)
 	if err := rh.index.Write(rec); err != nil {
 		log.Error(err.Error())
 	}

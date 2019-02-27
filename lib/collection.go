@@ -14,7 +14,7 @@ type Collection interface {
 	Walks() ([]Walk, error)
 }
 
-// collection implements the exported interface
+// collection implements the exported Collection interface
 type collection struct {
 	walks []Walk
 }

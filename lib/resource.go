@@ -18,6 +18,8 @@ import (
 
 // Resource is data associated with a given URL at a point in time
 type Resource struct {
+	// Unique identifier for the crawl job that created this resource
+	JobID string `json:"jobID,omitempty"`
 	// A Url is uniquely identified by URI string without
 	// any normalization. Url strings must always be absolute.
 	URL string `json:"url"`
