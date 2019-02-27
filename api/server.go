@@ -8,7 +8,7 @@ import (
 	"github.com/qri-io/walk/lib"
 )
 
-// Server wraps an
+// Server wraps a collection, turning it into an API server
 type Server struct {
 	collection lib.Collection
 	server     *http.Server

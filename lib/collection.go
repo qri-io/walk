@@ -20,8 +20,9 @@ type collection struct {
 }
 
 // NewCollectionFromConfig creates a collection from a collection configuration
-// currently it only supports creating CBOR walk readers from exact directories
-// in the future it's functionality should be expanded
+// currently it only supports creating CBOR walk readers from exact directories.
+// in the future functionality should be expanded to write to places other than
+// a local filesystem
 func NewCollectionFromConfig(cfg *CollectionConfig) (Collection, error) {
 	var walks []Walk
 	for _, path := range cfg.LocalDirs {

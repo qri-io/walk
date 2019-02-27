@@ -122,7 +122,7 @@ type CoordinatorConfig struct {
 	// DelayMilli determines how long to wait between fetches for a given worker
 	DelayMilli int
 	// StopAfterEntries kills the crawler after a specified number of urls have
-	// been visited. default of 0 don't limit the number of entries
+	// been visited. a value of 0 (the default) doesn't limit the number of entries
 	StopAfterEntries int
 	// StopUrl will stop the crawler after crawling a given URL
 	StopURL string
