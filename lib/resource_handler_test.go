@@ -17,7 +17,10 @@ func TestCBORResourceFileWriter(t *testing.T) {
 	}
 	defer os.RemoveAll(tmp)
 
-	rh := &CBORResourceFileWriter{BasePath: tmp}
+	rh, err := NewCBORResourceFileWriter(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	expectType := "CBOR"
 	gotType := rh.Type()

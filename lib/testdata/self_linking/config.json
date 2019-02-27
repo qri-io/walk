@@ -1,5 +1,6 @@
 {
   "Coordinator": {
+    "Crawl": true,
     "Domains": [],
     "IgnorePatterns": [],
     "Seeds": [],

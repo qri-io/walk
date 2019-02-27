@@ -15,19 +15,11 @@ type BadgerConfig struct {
 
 // NewBadgerConfig creates a badger configuration with default options
 func NewBadgerConfig() *BadgerConfig {
-	// wd, err := os.Getwd()
-	// if err != nil {
-	// 	panic(err)
-	// }
-
 	cfg := &BadgerConfig{
 		Options: badger.DefaultOptions,
 	}
-	// cfg.Dir = filepath.Join(wd, "badger")
-	// cfg.ValueDir = filepath.Join(wd, "badger")
 	cfg.Dir = "badger"
 	cfg.ValueDir = "badger"
-
 	return cfg
 }
 

@@ -9,8 +9,7 @@ import (
 	"github.com/PuerkitoBio/fetchbot"
 )
 
-// Worker is the interface turning Requests into Resources
-// by performing fetches
+// Worker is the interface turning Requests into Resources by performing fetches
 type Worker interface {
 	SetDelay(time.Duration)
 	Start(coord WorkCoordinator) error
@@ -95,7 +94,7 @@ func (w *LocalWorker) Start(coord WorkCoordinator) error {
 		for {
 			select {
 			case fr := <-ch:
-				tg, err := NewTimedGet(fr.URL)
+				tg, err := NewTimedGet(fr.JobID, fr.URL)
 				if err != nil {
 					log.Error(err.Error())
 					continue
@@ -105,6 +104,7 @@ func (w *LocalWorker) Start(coord WorkCoordinator) error {
 					continue
 				}
 				i = (i + 1) % len(w.queues)
+				time.Sleep(time.Duration(w.cfg.DelayMilli) * time.Millisecond)
 			case <-w.stop:
 				for _, q := range w.queues {
 					q.Close()
@@ -141,15 +141,22 @@ func newMux(coord WorkCoordinator, recordRedirects, recordHeaders bool) *fetchbo
 
 			r := &Resource{URL: ctx.Cmd.URL().String()}
 
-			// TODO - huh? why this here? figure out & make a note
+			// when recording redirects we need to fetch the url from a different location thanks to the way
+			// our custom HandleRedirectClient works
 			if recordRedirects {
 				r = &Resource{URL: NormalizeURL(res.Request.URL)}
+
+				// if this was redirected from somewhere, record where
+				if res.Request.Response != nil && res.Request.Response.Request != nil {
+					r.RedirectFrom = NormalizeURL(res.Request.Response.Request.URL)
+				}
 			}
 
 			log.Infof("[%d] %s %s", res.StatusCode, ctx.Cmd.Method(), r.URL)
 
 			var st time.Time
 			if timedCmd, ok := ctx.Cmd.(*TimedCmd); ok {
+				r.JobID = timedCmd.JobID
 				st = timedCmd.Started
 			}
 
@@ -198,9 +205,10 @@ func NewRecordRedirectClient(wc WorkCoordinator) *http.Client {
 				log.Infof("[%d] %s %s -> %s", req.Response.StatusCode, prev.Method, prevurl, canurlstr)
 
 				wc.Completed(&Resource{
-					URL:        prevurl,
-					Timestamp:  time.Now(),
-					Status:     req.Response.StatusCode,
+					URL:       prevurl,
+					Timestamp: time.Now(),
+					Status:    req.Response.StatusCode,
+					// RedirectFrom: prevurl,
 					RedirectTo: canurlstr,
 				})
 			}
@@ -216,20 +224,22 @@ func NewRecordRedirectClient(wc WorkCoordinator) *http.Client {
 // TimedCmd defines a Command implementation that sets an internal timestamp
 // whenever it's URL method is called
 type TimedCmd struct {
+	JobID   string
 	U       *url.URL
 	M       string
 	Started time.Time
 }
 
 // NewTimedGet creates a new GET command with an internal Timer
-func NewTimedGet(rawurl string) (*TimedCmd, error) {
+func NewTimedGet(jobID, rawurl string) (*TimedCmd, error) {
 	u, err := url.Parse(rawurl)
 	if err != nil {
 		return nil, err
 	}
 	return &TimedCmd{
-		U: u,
-		M: "GET",
+		JobID: jobID,
+		U:     u,
+		M:     "GET",
 	}, nil
 }
 
@@ -245,198 +255,3 @@ func (c *TimedCmd) URL() *url.URL {
 func (c *TimedCmd) Method() string {
 	return c.M
 }
-
-// Start initiates the crawler
-// func (c *Coordinator) Start(stop chan bool) error {
-//  var (
-//    mux                  fetchbot.Handler
-//    httpcli              *http.Client
-//    unfetchedT, backoffT *time.Ticker
-//  )
-
-//  mux = newMux(c, stop)
-//  httpcli = newHTTPClient(c)
-
-//  if c.cfg.StopURL != "" {
-//    mux = stopHandler(c.cfg.StopURL, stop, mux)
-//  }
-
-//  c.crawlers = make([]*fetchbot.Fetcher, c.cfg.Parallelism)
-//  for i := 0; i < c.cfg.Parallelism; i++ {
-//    fb := newFetchbot(i, c, mux, httpcli)
-//    c.crawlers[i] = fb
-//  }
-
-//  start := time.Now()
-//  qs, stopCrawling, done := c.startCrawling(c.crawlers)
-//  c.queues = qs
-
-//  if c.cfg.UnfetchedScanFreqMilliseconds > 0 {
-//    d := time.Millisecond * time.Duration(c.cfg.UnfetchedScanFreqMilliseconds)
-//    log.Infof("checking for unfetched urls every %f seconds", d.Seconds())
-//    unfetchedT = time.NewTicker(d)
-//    go func() {
-//      for range unfetchedT.C {
-//        if !c.stopping {
-//          if len(c.next) == queueBufferSize {
-//            log.Infof("next queue is full, skipping scan")
-//            continue
-//          }
-
-//          log.Infof("scanning for unfetched links")
-//          ufl := c.gatherUnfetchedLinks(250, stop)
-//          for linkurl := range ufl {
-//            c.next <- linkurl
-//          }
-//          log.Infof("seeded %d unfetched links from interval", len(ufl))
-//        }
-//      }
-//    }()
-//  }
-
-//  go func(qs []*fetchbot.Queue) {
-//    // make sure each fetchbot pulls at least one url to get it started
-//    for _, q := range qs {
-//      c.queNextURL(q)
-//    }
-//  }(qs)
-
-//  log.Infof("crawl started at %s", start)
-//  <-done
-//  return nil
-// }
-
-// startCrawling initializes the crawler, queue, stopCrawler channel, and crawlingURLS slice
-// func (c *Coordinator) startCrawling(crawlers []*fetchbot.Fetcher) (qs []*fetchbot.Queue, stopCrawling, done chan bool) {
-//  log.Infof("starting crawl with %d crawlers for %d domains", len(crawlers), len(c.domains))
-//  freq := time.Duration(c.cfg.CrawlDelayMilliseconds) * time.Millisecond
-//  log.Infof("crawler request frequency: ~%f req/minute", float64(len(crawlers))/freq.Minutes())
-//  stopCrawling = make(chan bool)
-//  done = make(chan bool)
-//  qs = make([]*fetchbot.Queue, len(crawlers))
-
-//  wg := sync.WaitGroup{}
-
-//  for i, fetcher := range crawlers {
-//    // Start processing
-//    qs[i] = fetcher.Start()
-//    time.Sleep(time.Second)
-//    wg.Add(1)
-
-//    go func(i int) {
-//      qs[i].Block()
-//      log.Infof("finished crawler: %d", i)
-//      wg.Done()
-//    }(i)
-//  }
-
-//  go func() {
-//    <-stopCrawling
-//    c.stopping = true
-//    log.Info("stopping crawlers")
-//    for _, q := range qs {
-//      q.Close()
-//    }
-//  }()
-
-//  go func() {
-//    wg.Wait()
-//    log.Info("done")
-//    done <- true
-//  }()
-
-//  seeds := FilterStrings(c.cfg.Seeds, c.urlStringIsCandidate)
-//  log.Infof("adding %d/%d seed urls", len(seeds), len(c.cfg.Seeds))
-
-//  for i, s := range seeds {
-//    if i < len(qs) {
-//      c.addURLToQue(qs[i], s)
-//      continue
-//    }
-//    c.next <- s
-//  }
-//  return
-// }
-
-// func (c *Coordinator) unqueURLs(remove ...string) {
-//  if len(remove) > 0 {
-//    c.queLock.Lock()
-//    defer c.queLock.Unlock()
-//    for _, rm := range remove {
-//      c.queued[rm] = false
-//    }
-//  }
-// }
-
-// func (c *Coordinator) queNextURL(q *fetchbot.Queue) {
-//  for {
-//    rawurl := <-c.next
-//    if err := c.addURLToQue(q, rawurl); err == nil {
-//      break
-//    }
-//  }
-// }
-
-// func (c *Coordinator) addURLToQue(q *fetchbot.Queue, rawurl string) error {
-// 	u, err := url.Parse(rawurl)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	if err := isWebpageURL(u); err != nil {
-// 		return errInvalidFetchURL
-// 	}
-
-// 	normurl := NormalizeURLString(u)
-
-// 	c.urlLock.Lock()
-// 	if c.urls[normurl] != nil {
-// 		c.urlLock.Unlock()
-// 		return errAlreadyFetched
-// 	}
-// 	c.urlLock.Unlock()
-
-// 	c.queLock.Lock()
-// 	defer c.queLock.Unlock()
-
-// 	if c.queued[normurl] {
-// 		return errInQueue
-// 	}
-
-// 	return nil
-// }
-
-// func (c *Coordinator) gatherUnfetchedLinks(max int, stop chan bool) map[string]bool {
-// 	c.urlLock.Lock()
-// 	defer c.urlLock.Unlock()
-
-// 	links := make(map[string]bool, max)
-// 	i := 0
-
-// 	for _, u := range c.urls {
-// 		if u != nil && u.Status == 200 {
-// 			for _, linkurl := range u.Links {
-// 				if c.urlStringIsCandidate(linkurl) {
-// 					linku := c.urls[linkurl]
-// 					if (linku == nil || linku.Status != http.StatusOK) && links[linkurl] == false {
-// 						links[linkurl] = true
-// 						i++
-// 						if i == max {
-// 							log.Infof("found max of %d unfetched links", max)
-// 							return links
-// 						}
-// 					}
-// 				}
-// 			}
-// 		}
-// 	}
-
-// 	if i > 0 {
-// 		log.Infof("found %d unfetched links", i)
-// 	} else if stop != nil {
-// 		log.Infof("no unfetched links found. sending stop")
-// 		stop <- true
-// 	}
-
-// 	return links
-// }

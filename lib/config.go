@@ -14,6 +14,7 @@ type Config struct {
 	Coordinator      *CoordinatorConfig
 	RequestStore     *RequestStoreConfig
 	Queue            *QueueConfig
+	Collection       *CollectionConfig
 	Workers          []*WorkerConfig
 	ResourceHandlers []*ResourceHandlerConfig
 }
@@ -33,11 +34,16 @@ func ApplyConfigs(configs ...func(c *Config)) *Config {
 func DefaultConfig() *Config {
 	return &Config{
 		Coordinator: &CoordinatorConfig{
+			Crawl:            true,
 			Domains:          []string{"https://datatogether.org"},
 			Seeds:            []string{"https://datatogether.org"},
 			MaxAttempts:      3,
 			StopAfterEntries: 5,
 			DoneScanMilli:    30000,
+		},
+		Collection: &CollectionConfig{
+			// default to checking local directory for collections
+			LocalDirs: []string{"."},
 		},
 		Workers: []*WorkerConfig{
 			&WorkerConfig{
@@ -73,32 +79,50 @@ func (cfg *Config) BadgerDB() (*badger.DB, error) {
 // file is present. If a file is present but not valid json, the program panics
 func JSONConfigFromFilepath(path string) func(*Config) {
 	return func(c *Config) {
-		if data, err := ioutil.ReadFile(path); err == nil {
-			cfg := Config{}
-			log.Infof("using config file: %s", path)
-			if err := json.Unmarshal(data, &cfg); err != nil {
-				err = fmt.Errorf("error parsing configuration file at path: %s: %s", path, err.Error())
-				log.Errorf(err.Error())
-				panic(err)
-			}
-			*c = cfg
+		cfg, err := ReadJSONConfigFile(path)
+		if err != nil {
+			panic(err)
 		}
+		log.Infof("using config file: %s", path)
+		*c = *cfg
 	}
+}
+
+// ReadJSONConfigFile reads a configuration JSON file
+func ReadJSONConfigFile(path string) (*Config, error) {
+	data, err := ioutil.ReadFile(path)
+	if err != nil {
+		err = fmt.Errorf("error reading configuration file at path: %s: %s", path, err.Error())
+		return nil, err
+	}
+
+	cfg := &Config{}
+	if err := json.Unmarshal(data, cfg); err != nil {
+		err = fmt.Errorf("error parsing configuration file at path: %s: %s", path, err.Error())
+	}
+
+	return cfg, nil
 }
 
 // CoordinatorConfig holds all Coordinator configuration details
 type CoordinatorConfig struct {
+	// Seeds is a list of urls to seed the crawler with
+	Seeds []string
+	// SeedsPath is a filepath or URL to a newline-delimited list of seed URL strings
+	SeedsPath string
+	// If true, links from completed resources returned to the coordinator will
+	// be added to the queue (aka, crawling). Only links within the domains list
+	// that don't match ignore patterns will be crawled
+	Crawl bool
 	// Domains is the list of domains to crawl. Only domains listed
 	// in this list will be crawled
 	Domains []string
-	// Seeds is a list of urls to seed the crawler with
-	Seeds []string
 	// Ignore is a list of url patterns to ignore
 	IgnorePatterns []string
 	// DelayMilli determines how long to wait between fetches for a given worker
 	DelayMilli int
-	// StopAfterEntries kills the crawler after a specified number of urls have been visited
-	// default of 0 don't limit the number of entries
+	// StopAfterEntries kills the crawler after a specified number of urls have
+	// been visited. a value of 0 (the default) doesn't limit the number of entries
 	StopAfterEntries int
 	// StopUrl will stop the crawler after crawling a given URL
 	StopURL string
@@ -112,7 +136,7 @@ type CoordinatorConfig struct {
 	BackoffResponseCodes []int
 	// MaxAttempts is the maximum number of times to try a url before giving up
 	MaxAttempts int
-	// How frequently to check to see if
+	// How frequently to check to see if crawl is done, in milliseconds
 	DoneScanMilli int
 }
 
@@ -150,4 +174,11 @@ type ResourceHandlerConfig struct {
 	// Prefix implements any namespacing for this config
 	// not used by all ResourceHandlers
 	Prefix string
+}
+
+// CollectionConfig configures the on-disk collection. There can be at most
+// one collection per walk process
+type CollectionConfig struct {
+	// LocalDirs is a slice of locations on disk to check for walks
+	LocalDirs []string
 }
