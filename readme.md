@@ -23,7 +23,7 @@ $ make install
 
 ---
 
-* NDJSON (nweline delimited JSON)
+* NDJSON (newline delimited JSON)
 
 short term
   * reliably scrape a _set_ of urls
