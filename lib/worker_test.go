@@ -11,8 +11,8 @@ func TestRedirectRecording(t *testing.T) {
 	ts := NewHTTPRedirectTestServer(false)
 
 	cfg := DefaultConfig()
-	cfg.Coordinator.Seeds = []string{ts.URL}
-	cfg.Coordinator.StopURL = ts.URL + "/e"
+	cfg.Job.Seeds = []string{ts.URL}
+	cfg.Job.StopURL = ts.URL + "/e"
 	cfg.ResourceHandlers = []*ResourceHandlerConfig{
 		{Type: "MEM"},
 	}

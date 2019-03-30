@@ -21,16 +21,16 @@ type WorkCoordinator interface {
 	// Queue returns a channel of Requests, which contain urls that need
 	// to be fetched & turned into one or more resources
 	Queue() (chan *Request, error)
-	// Completed work is submitted to the coordinator by submitting one or more
+	// Completed work is submitted to the Job by submitting one or more
 	// constructed resources
 	Completed(rsc ...*Resource) error
 }
 
-// Coordinator is the central reporting hub for a crawl. It's in charge of populating
+// Job is the central reporting hub for a crawl. It's in charge of populating
 // the queue & keeping up-to-date records in the fetch request store. workers post their
-// completed work back to the coordinator, which sends the created resources to any
+// completed work back to the Job, which sends the created resources to any
 // registered resource handlers
-type Coordinator struct {
+type Job struct {
 	// id for this crawl
 	jobID string
 	// time crawler started
@@ -39,7 +39,7 @@ type Coordinator struct {
 	urlsWritten int
 
 	// cfg embeds this crawl's configuration
-	cfg *CoordinatorConfig
+	cfg *JobConfig
 
 	// domains is a list of domains to fetch from
 	domains []*url.URL
@@ -67,9 +67,9 @@ func newJobID() string {
 
 // NewWalkJob creates a new walk write process from a given set of configurations
 // if no configuration is provided, the default is used
-// start the walk by calling Start on the returned coordinator
+// start the walk by calling Start on the returned Job
 // halt the walk by sending a value on the returned stop channel
-func NewWalkJob(configs ...func(*Config)) (coord *Coordinator, stop chan bool, err error) {
+func NewWalkJob(configs ...func(*Config)) (coord *Job, stop chan bool, err error) {
 	// combine configurations with default
 	cfg := ApplyConfigs(configs...)
 
@@ -90,7 +90,7 @@ func NewWalkJob(configs ...func(*Config)) (coord *Coordinator, stop chan bool, e
 	}
 
 	// create coodinator
-	coord = NewCoordinator(jobID, cfg.Coordinator, queue, frs, hs)
+	coord = NewJob(jobID, cfg.Job, queue, frs, hs)
 	stop = make(chan bool)
 
 	// start workers
@@ -101,14 +101,14 @@ func NewWalkJob(configs ...func(*Config)) (coord *Coordinator, stop chan bool, e
 	return
 }
 
-// Config exposes the coordinator configuration
-func (c *Coordinator) Config() *CoordinatorConfig {
+// Config exposes the Job configuration
+func (c *Job) Config() *JobConfig {
 	return c.cfg
 }
 
-// NewCoordinator creates a Coordinator
-func NewCoordinator(jobID string, cfg *CoordinatorConfig, q Queue, frs RequestStore, rh []ResourceHandler) *Coordinator {
-	c := &Coordinator{
+// NewJob creates a Job
+func NewJob(jobID string, cfg *JobConfig, q Queue, frs RequestStore, rh []ResourceHandler) *Job {
+	c := &Job{
 		jobID:      jobID,
 		cfg:        cfg,
 		queue:      q,
@@ -131,8 +131,8 @@ func NewCoordinator(jobID string, cfg *CoordinatorConfig, q Queue, frs RequestSt
 	return c
 }
 
-// SetHandlers configures the coordinator's resource handlers
-func (c *Coordinator) SetHandlers(rh []ResourceHandler) error {
+// SetHandlers configures the Job's resource handlers
+func (c *Job) SetHandlers(rh []ResourceHandler) error {
 	if !c.start.IsZero() {
 		return fmt.Errorf("crawl already started")
 	}
@@ -140,15 +140,15 @@ func (c *Coordinator) SetHandlers(rh []ResourceHandler) error {
 	return nil
 }
 
-// ResourceHandlers exposes the coordinator's ResourceHandlers
-func (c *Coordinator) ResourceHandlers() []ResourceHandler {
+// ResourceHandlers exposes the Job's ResourceHandlers
+func (c *Job) ResourceHandlers() []ResourceHandler {
 	return c.handlers
 }
 
 // Start kicks off coordinated fetching, seeding the queue & store & awaiting responses
 // start will block until a signal is received on the stop channel, keep in mind
 // a number of conditions can stop the crawler depending on configuration
-func (c *Coordinator) Start(stop chan bool) (err error) {
+func (c *Job) Start(stop chan bool) (err error) {
 	var (
 		seedr                           io.Reader
 		unfetchedT, backoffT, doneScanT *time.Ticker
@@ -253,7 +253,7 @@ func (c *Coordinator) Start(stop chan bool) (err error) {
 	return nil
 }
 
-func (c *Coordinator) enqueSeedsPath() (r io.Reader, err error) {
+func (c *Job) enqueSeedsPath() (r io.Reader, err error) {
 	if c.cfg.SeedsPath == "" {
 		return nil, nil
 	}
@@ -281,12 +281,12 @@ func (c *Coordinator) enqueSeedsPath() (r io.Reader, err error) {
 }
 
 // Queue gives access to the underlying queue as a channel of Fetch Requests
-func (c *Coordinator) Queue() (chan *Request, error) {
+func (c *Job) Queue() (chan *Request, error) {
 	return c.queue.Chan()
 }
 
-// Completed sends one or more constructed resources to the coordinator
-func (c *Coordinator) Completed(rsc ...*Resource) error {
+// Completed sends one or more constructed resources to the Job
+func (c *Job) Completed(rsc ...*Resource) error {
 
 	// handle any global state changes that may result from completed work
 	// TODO - finish
@@ -332,7 +332,7 @@ func (c *Coordinator) Completed(rsc ...*Resource) error {
 	return nil
 }
 
-func (c *Coordinator) enqueue(rs ...*Request) {
+func (c *Job) enqueue(rs ...*Request) {
 	for _, r := range rs {
 		r.JobID = c.jobID
 		if c.stopping {
@@ -348,7 +348,7 @@ func (c *Coordinator) enqueue(rs ...*Request) {
 	}
 }
 
-func (c *Coordinator) dequeue(rsc *Resource) error {
+func (c *Job) dequeue(rsc *Resource) error {
 	fr, err := c.frs.Get(rsc.URL)
 	if err == ErrNotFound {
 		fr = &Request{URL: rsc.URL}
@@ -389,7 +389,7 @@ func (c *Coordinator) dequeue(rsc *Resource) error {
 	return c.frs.Put(fr)
 }
 
-func (c *Coordinator) setCrawlDelay(d time.Duration) {
+func (c *Job) setCrawlDelay(d time.Duration) {
 	c.crawlDelay = d
 	for _, c := range c.workers {
 		c.SetDelay(d)
@@ -402,7 +402,7 @@ func (c *Coordinator) setCrawlDelay(d time.Duration) {
 // the passed-in url
 // TODO - this is slated to eventually not be a simple list of ignored URLs,
 // but a list of regexes or some other special pattern.
-func (c *Coordinator) urlStringIsCandidate(rawurl string) bool {
+func (c *Job) urlStringIsCandidate(rawurl string) bool {
 	for _, ignore := range c.cfg.IgnorePatterns {
 		if strings.Contains(rawurl, ignore) {
 			return false
@@ -425,6 +425,6 @@ func (c *Coordinator) urlStringIsCandidate(rawurl string) bool {
 	return false
 }
 
-func (c *Coordinator) okResponseStatus(s int) bool {
+func (c *Job) okResponseStatus(s int) bool {
 	return s >= http.StatusOK && s <= http.StatusPermanentRedirect
 }

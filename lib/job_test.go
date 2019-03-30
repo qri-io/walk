@@ -17,7 +17,7 @@ func TestNewWalkJob(t *testing.T) {
 }
 
 // test that a given URL won’t get queued more than once in the same crawl
-func TestCoordinatorNoRequeue(t *testing.T) {
+func TestJobNoRequeue(t *testing.T) {
 	reqs := map[string]int{}
 	tc := NewHTTPDirTestCase(t, "testdata/self_linking")
 	s := tc.Server()
@@ -38,7 +38,7 @@ func TestCoordinatorNoRequeue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err.Error())
 	}
-	coord := NewCoordinator(jobID, cfg.Coordinator, queue, frs, nil)
+	coord := NewJob(jobID, cfg.Job, queue, frs, nil)
 	stop := make(chan bool)
 
 	// start workers
@@ -50,12 +50,12 @@ func TestCoordinatorNoRequeue(t *testing.T) {
 	t.Log(coord.urlsWritten)
 }
 
-func TestCoordinatorNoCrawl(t *testing.T) {
+func TestJobNoCrawl(t *testing.T) {
 	reqs := map[string]int{}
 	tc := NewHTTPDirTestCase(t, "testdata/self_linking")
 	s := tc.Server()
 	cfg := ApplyConfigs(tc.Config(s), func(c *Config) {
-		c.Coordinator.Crawl = false
+		c.Job.Crawl = false
 	})
 
 	jobID := newJobID()
@@ -73,7 +73,7 @@ func TestCoordinatorNoCrawl(t *testing.T) {
 	if err != nil {
 		t.Fatal(err.Error())
 	}
-	coord := NewCoordinator(jobID, cfg.Coordinator, queue, frs, nil)
+	coord := NewJob(jobID, cfg.Job, queue, frs, nil)
 	stop := make(chan bool)
 
 	// start workers

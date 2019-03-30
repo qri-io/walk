@@ -10,8 +10,9 @@ import (
 
 // Config is the global configuration for all components of a walk
 type Config struct {
-	Badger           *BadgerConfig
-	Coordinator      *CoordinatorConfig
+	Badger *BadgerConfig
+	// a base job to start with
+	Job              *JobConfig
 	RequestStore     *RequestStoreConfig
 	Queue            *QueueConfig
 	Collection       *CollectionConfig
@@ -33,7 +34,7 @@ func ApplyConfigs(configs ...func(c *Config)) *Config {
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		Coordinator: &CoordinatorConfig{
+		Job: &JobConfig{
 			Crawl:            true,
 			Domains:          []string{"https://datatogether.org"},
 			Seeds:            []string{"https://datatogether.org"},
@@ -104,13 +105,13 @@ func ReadJSONConfigFile(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// CoordinatorConfig holds all Coordinator configuration details
-type CoordinatorConfig struct {
+// JobConfig holds all Job configuration details
+type JobConfig struct {
 	// Seeds is a list of urls to seed the crawler with
 	Seeds []string
 	// SeedsPath is a filepath or URL to a newline-delimited list of seed URL strings
 	SeedsPath string
-	// If true, links from completed resources returned to the coordinator will
+	// If true, links from completed resources returned to the job will
 	// be added to the queue (aka, crawling). Only links within the domains list
 	// that don't match ignore patterns will be crawled
 	Crawl bool

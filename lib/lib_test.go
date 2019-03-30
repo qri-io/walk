@@ -53,8 +53,8 @@ func (t *HTTPDirTestCase) Server() *httptest.Server {
 func (t *HTTPDirTestCase) Config(s *httptest.Server) func(c *Config) {
 	return func(c *Config) {
 		JSONConfigFromFilepath(filepath.Join(t.DirPath, configFilename))(c)
-		c.Coordinator.Domains = append(c.Coordinator.Domains, s.URL)
-		c.Coordinator.Seeds = append(c.Coordinator.Seeds, s.URL)
+		c.Job.Domains = append(c.Job.Domains, s.URL)
+		c.Job.Seeds = append(c.Job.Seeds, s.URL)
 	}
 }
 
@@ -62,7 +62,7 @@ func (t *HTTPDirTestCase) Config(s *httptest.Server) func(c *Config) {
 // coordinator values with testserver urls
 func ServerJSONConfig(s *httptest.Server) func(c *Config) {
 	return func(c *Config) {
-		c.Coordinator.Domains = []string{s.URL}
-		c.Coordinator.Seeds = []string{s.URL}
+		c.Job.Domains = []string{s.URL}
+		c.Job.Seeds = []string{s.URL}
 	}
 }
