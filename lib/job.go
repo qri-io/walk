@@ -10,110 +10,15 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
-// WorkCoordinator can coordinate workers. Workers pull from the output Requests
-// channel and post finished resources using the completed method. This is the
-// minimum interface a worker should need to turn Requests into Resources
-type WorkCoordinator interface {
-	// Queue returns a channel of Requests, which contain urls that need
-	// to be fetched & turned into one or more resources
-	Queue() (chan *Request, error)
-	// Completed work is submitted to the Job by submitting one or more
-	// constructed resources
-	Completed(rsc ...*Resource) error
-}
-
-// Job is the central reporting hub for a crawl. It's in charge of populating
-// the queue & keeping up-to-date records in the fetch request store. workers post their
-// completed work back to the Job, which sends the created resources to any
-// registered resource handlers
-type Job struct {
-	// id for this crawl
-	jobID string
-	// time crawler started
-	start time.Time
-	// how many urls have been fetched and written to urls
-	urlsWritten int
-
-	// cfg embeds this crawl's configuration
-	cfg *JobConfig
-
-	// domains is a list of domains to fetch from
-	domains []*url.URL
-
-	queue    Queue
-	frs      RequestStore
-	handlers []ResourceHandler
-	workers  []Worker
-
-	// crawlDelay is the current delay between requests on fetchbots
-	// if Backoff is enabled this can get higher than cfg.CrawlDelayMilliseconds
-	crawlDelay time.Duration
-
-	// unexported channel to send stop signal on
-	stop chan bool
-	// flag indicating crawler is stopping
-	stopping bool
-	// finished is a count of the total number of urls finished
-	finished int
-}
-
-func newJobID() string {
-	return strconv.Itoa(1)
-}
-
-// NewWalkJob creates a new walk write process from a given set of configurations
-// if no configuration is provided, the default is used
-// start the walk by calling Start on the returned Job
-// halt the walk by sending a value on the returned stop channel
-func NewWalkJob(configs ...func(*Config)) (coord *Job, stop chan bool, err error) {
-	// combine configurations with default
-	cfg := ApplyConfigs(configs...)
-
-	jobID := newJobID()
-
-	// create queue, store, workers, and handlers
-	// TODO - needs to leverage config
-	queue := NewMemQueue()
-	// TODO - needs to leverage config
-	frs := NewMemRequestStore()
-	ws, err := NewWorkers(cfg.Workers)
-	if err != nil {
-		return
-	}
-	hs, err := NewResourceHandlers(cfg)
-	if err != nil {
-		return
-	}
-
-	// create coodinator
-	coord = NewJob(jobID, cfg.Job, queue, frs, hs)
-	stop = make(chan bool)
-
-	// start workers
-	for _, w := range ws {
-		w.Start(coord)
-	}
-
-	return
-}
-
-// Config exposes the Job configuration
-func (c *Job) Config() *JobConfig {
-	return c.cfg
-}
-
 // NewJob creates a Job
-func NewJob(jobID string, cfg *JobConfig, q Queue, frs RequestStore, rh []ResourceHandler) *Job {
+func NewJob(cfg *JobConfig, coord Coordinator) *Job {
 	c := &Job{
-		jobID:      jobID,
+		ID:         newJobID(),
 		cfg:        cfg,
-		queue:      q,
-		frs:        frs,
-		handlers:   rh,
+		coord:      coord,
 		crawlDelay: time.Duration(cfg.DelayMilli) * time.Millisecond,
 	}
 
@@ -131,31 +36,88 @@ func NewJob(jobID string, cfg *JobConfig, q Queue, frs RequestStore, rh []Resour
 	return c
 }
 
-// SetHandlers configures the Job's resource handlers
-func (c *Job) SetHandlers(rh []ResourceHandler) error {
-	if !c.start.IsZero() {
-		return fmt.Errorf("crawl already started")
-	}
-	c.handlers = rh
-	return nil
+// Job is the central reporting hub for a crawl. It's in charge of populating
+// the queue & keeping up-to-date records in the fetch request store. workers post their
+// completed work back to the Job, which sends the created resources to any
+// registered resource handlers
+type Job struct {
+	// id for this crawl
+	ID string
+	// Current job execution state, managed by coordinator
+	status JobStatus
+	// If execution errors, it's value should be set here
+	err error
+	// time crawler started
+	start time.Time
+	// finished is a count of the total number of urls finished
+	finished int
+	// cfg embeds this crawl's configuration
+	cfg *JobConfig
+	// domains is a list of domains to fetch from
+	domains []*url.URL
+	// crawlDelay is the current delay between requests on fetchbots
+	// if Backoff is enabled this can get higher than cfg.CrawlDelayMilliseconds
+	crawlDelay time.Duration
+	// coordinator that owns this job
+	coord Coordinator
+	// cahnnel to halt job
+	stop chan bool
 }
 
-// ResourceHandlers exposes the Job's ResourceHandlers
-func (c *Job) ResourceHandlers() []ResourceHandler {
-	return c.handlers
+// JobStatus tracks the state of a job
+type JobStatus uint8
+
+const (
+	// JobStatusNew indicates a newly-created job
+	JobStatusNew JobStatus = iota
+	// JobStatusRunning indicates a job is running
+	JobStatusRunning
+	// JobStatusPaused indicates a job is paused
+	JobStatusPaused
+	// JobStatusComplete indicates a job is finished
+	JobStatusComplete
+	// JobStatusErrored indicates a job is errored
+	JobStatusErrored
+)
+
+// String implements the stringer interface for job Status
+func (js JobStatus) String() string {
+	switch js {
+	case JobStatusNew:
+		return "new"
+	case JobStatusRunning:
+		return "running"
+	case JobStatusPaused:
+		return "paused"
+	case JobStatusComplete:
+		return "complete"
+	case JobStatusErrored:
+		return "errored"
+	}
+	return "unknown"
+}
+
+func newJobID() string {
+	return strconv.Itoa(1)
+}
+
+// Config exposes the Job configuration
+func (c *Job) Config() *JobConfig {
+	return c.cfg
 }
 
 // Start kicks off coordinated fetching, seeding the queue & store & awaiting responses
 // start will block until a signal is received on the stop channel, keep in mind
 // a number of conditions can stop the crawler depending on configuration
-func (c *Job) Start(stop chan bool) (err error) {
+func (c *Job) Start() (err error) {
 	var (
-		seedr                           io.Reader
-		unfetchedT, backoffT, doneScanT *time.Ticker
-		finalizerErrs                   []error
-		wg                              sync.WaitGroup
+		backoffT *time.Ticker
+		// seedr                           io.Reader
+		// unfetchedT, doneScanT *time.Ticker
+		// finalizerErrs                   []error
+		// wg sync.WaitGroup
 	)
-	c.stop = stop
+	c.stop = make(chan bool)
 
 	if len(c.cfg.BackoffResponseCodes) > 0 {
 		backoffT = time.NewTicker(time.Minute)
@@ -169,88 +131,80 @@ func (c *Job) Start(stop chan bool) (err error) {
 		}()
 	}
 
-	if seedr, err = c.enqueSeedsPath(); err != nil {
-		return fmt.Errorf("getting SeedsPath: %s", err.Error())
-	}
-
-	if c.cfg.DoneScanMilli > 0 {
-		doneScanT = time.NewTicker(time.Millisecond * time.Duration(c.cfg.DoneScanMilli))
-		log.Debugf("performing done scan checks every %d secs.", c.cfg.DoneScanMilli/1000)
-		go func() {
-			for range doneScanT.C {
-				l, err := c.queue.Len()
-				if err != nil {
-					log.Errorf("error getting queue length: %s", err.Error())
-					continue
-				}
-				if l == 0 {
-					reqs, err := c.frs.List(-1, 0)
-					if err != nil {
-						log.Errorf("error reading: %s", err.Error())
-						continue
-					}
-					for _, r := range reqs {
-						if !(r.Status == RequestStatusDone || r.Status == RequestStatusFailed) {
-							continue
-						}
-					}
-					log.Info("no urls remain for checking, nothing left in queue, we done")
-					c.stop <- true
-					return
-				}
-			}
-		}()
-	}
-
 	c.start = time.Now()
-
-	if seedr != nil {
-		go func(s *bufio.Scanner) {
-			for s.Scan() {
-				c.enqueue(&Request{URL: s.Text()})
-			}
-		}(bufio.NewScanner(seedr))
-	}
-
-	for _, url := range c.cfg.Seeds {
-		c.enqueue(&Request{URL: url})
-	}
 
 	// block until receive on stop
 	<-c.stop
 
-	// TODO - send stop signal to workers
-
 	// log.Infof("%d urls remain in que for checking and processing", len(c.next))
-	if unfetchedT != nil {
-		unfetchedT.Stop()
-	}
+	// if unfetchedT != nil {
+	// 	unfetchedT.Stop()
+	// }
 	if backoffT != nil {
 		backoffT.Stop()
 	}
 
-	for _, rh := range c.ResourceHandlers() {
-		if finalizer, ok := rh.(ResourceFinalizer); ok {
-			wg.Add(1)
-			go func(t string, f ResourceFinalizer, errs *[]error) {
-				if err := f.FinalizeResources(); err != nil {
-					*errs = append(*errs, fmt.Errorf("%s: %s", t, err))
-				}
-				wg.Done()
-			}(rh.Type(), finalizer, &finalizerErrs)
-		}
-	}
-	wg.Wait()
+	// for _, rh := range c.ResourceHandlers() {
+	// 	if finalizer, ok := rh.(ResourceFinalizer); ok {
+	// 		wg.Add(1)
+	// 		go func(t string, f ResourceFinalizer, errs *[]error) {
+	// 			if err := f.FinalizeResources(); err != nil {
+	// 				*errs = append(*errs, fmt.Errorf("%s: %s", t, err))
+	// 			}
+	// 			wg.Done()
+	// 		}(rh.Type(), finalizer, &finalizerErrs)
+	// 	}
+	// }
+	// wg.Wait()
 
-	if len(finalizerErrs) > 0 {
-		msg := "errors occured during finalization:\n"
-		for _, e := range finalizerErrs {
-			msg += fmt.Sprintf("%s\n", e.Error())
-		}
-		return fmt.Errorf(msg)
-	}
+	// if len(finalizerErrs) > 0 {
+	// 	msg := "errors occured during finalization:\n"
+	// 	for _, e := range finalizerErrs {
+	// 		msg += fmt.Sprintf("%s\n", e.Error())
+	// 	}
+	// 	return fmt.Errorf(msg)
+	// }
 
 	return nil
+}
+
+// Errored sets the current job state to errored & retains the error
+func (c *Job) Errored(err error) {
+	c.status = JobStatusErrored
+	c.err = err
+}
+
+// Complete marks the job as finished
+func (c *Job) Complete() {
+	c.stop <- true
+	c.status = JobStatusComplete
+}
+
+// Seeds produces a channel of seed URLS to enqueue
+func (c *Job) Seeds() (seeds chan string, err error) {
+	seeds = make(chan string)
+
+	var seedr io.Reader
+	if seedr, err = c.enqueSeedsPath(); err != nil {
+		return nil, fmt.Errorf("getting SeedsPath: %s", err.Error())
+	}
+
+	go func(c *Job, seedr io.Reader) {
+		for _, url := range c.cfg.Seeds {
+			seeds <- url
+		}
+
+		if seedr != nil {
+			s := bufio.NewScanner(seedr)
+			for s.Scan() {
+				seeds <- s.Text()
+			}
+		}
+
+		close(seeds)
+	}(c, seedr)
+
+	return nil, fmt.Errorf("not finished")
 }
 
 func (c *Job) enqueSeedsPath() (r io.Reader, err error) {
@@ -280,122 +234,13 @@ func (c *Job) enqueSeedsPath() (r io.Reader, err error) {
 	return bytes.NewBuffer(data), nil
 }
 
-// Queue gives access to the underlying queue as a channel of Fetch Requests
-func (c *Job) Queue() (chan *Request, error) {
-	return c.queue.Chan()
-}
-
-// Completed sends one or more constructed resources to the Job
-func (c *Job) Completed(rsc ...*Resource) error {
-
-	// handle any global state changes that may result from completed work
-	// TODO - finish
-	go func() {
-		// for _, resc := range c.cfg.BackoffResponseCodes {
-		// 	if res.StatusCode == resc {
-		// 		log.Infof("encountered %d response. backing off", resc)
-		// 		c.setCrawlDelay(c.crawlDelay + ((time.Duration(c.cfg.CrawlDelayMilliseconds) * time.Millisecond) / 2))
-		// 	}
-		// }
-		// if c.finished == c.cfg.StopAfterEntries {
-		// 	stop <- true
-		// }
-	}()
-
-	// handle resources and create a deduplicated map
-	// of unique candidate urls from all responses
-	links := map[string]bool{}
-	for _, r := range rsc {
-		if err := c.dequeue(r); err != nil {
-			log.Debugf("error dequing url: %s: %s", r.URL, err.Error())
-		}
-
-		if c.cfg.Crawl {
-			for _, l := range r.Links {
-				if c.urlStringIsCandidate(l) {
-					links[l] = true
-				}
-			}
-		}
-	}
-
-	for url := range links {
-		r, err := c.frs.Get(url)
-		if err != nil {
-			log.Debugf("err getting url: %s: %s", url, err.Error())
-		}
-		if r == nil {
-			c.enqueue(&Request{URL: url})
-		}
-	}
-
-	return nil
-}
-
-func (c *Job) enqueue(rs ...*Request) {
-	for _, r := range rs {
-		r.JobID = c.jobID
-		if c.stopping {
-			r.Status = RequestStatusFailed
-			c.frs.Put(r)
-			continue
-		}
-
-		log.Debugf("enqueue: %s", r.URL)
-		r.Status = RequestStatusQueued
-		c.frs.Put(r)
-		c.queue.Push(r)
-	}
-}
-
-func (c *Job) dequeue(rsc *Resource) error {
-	fr, err := c.frs.Get(rsc.URL)
-	if err == ErrNotFound {
-		fr = &Request{URL: rsc.URL}
-	} else if err != nil {
-		log.Debugf("err getting url: %s: %s", rsc.URL, err.Error())
-		return err
-	}
-
-	fr.PrevResStatus = rsc.Status
-	fr.AttemptsMade++
-
-	if c.okResponseStatus(fr.PrevResStatus) {
-		log.Debugf("dequeue: %s", fr.URL)
-		c.finished++
-		c.urlsWritten++
-		fr.Status = RequestStatusDone
-		// send completed records to each handler
-		for _, h := range c.handlers {
-			go h.HandleResource(rsc)
-		}
-		if c.cfg.StopURL == fr.URL {
-			log.Infof("stop url encountered, stopping")
-			// TODO (b5): horrible hack to make sure local tests pass b/c too much parallelism
-			// should cleanup & use a channel to wait for handle resources goroutines above
-			// to finish
-			time.Sleep(time.Millisecond * 100)
-			c.stop <- true
-		}
-		return nil
-	}
-
-	if fr.AttemptsMade <= c.cfg.MaxAttempts {
-		c.enqueue(fr)
-		return nil
-	}
-
-	fr.Status = RequestStatusFailed
-	return c.frs.Put(fr)
-}
-
 func (c *Job) setCrawlDelay(d time.Duration) {
 	c.crawlDelay = d
-	for _, c := range c.workers {
-		c.SetDelay(d)
-	}
+	// for _, c := range c.workers {
+	// 	c.SetDelay(d)
+	// }
 	log.Infof("crawler delay is now: %f seconds", c.crawlDelay.Seconds())
-	log.Infof("crawler request frequency: ~%f req/minute", float64(len(c.workers))/c.crawlDelay.Minutes())
+	// log.Infof("crawler request frequency: ~%f req/minute", float64(len(c.workers))/c.crawlDelay.Minutes())
 }
 
 // urlStringIsCandidate scans the slice of crawlingURLS to see if we should GET

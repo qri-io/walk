@@ -4,84 +4,66 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-
-	"github.com/dgraph-io/badger"
 )
 
-// Config is the global configuration for all components of a walk
-type Config struct {
-	Badger *BadgerConfig
-	// a base job to start with
-	Job              *JobConfig
-	RequestStore     *RequestStoreConfig
-	Queue            *QueueConfig
-	Collection       *CollectionConfig
-	Workers          []*WorkerConfig
-	ResourceHandlers []*ResourceHandlerConfig
+// CoordinatorConfig is the global configuration for all components of a walk
+type CoordinatorConfig struct {
+	Badger       *BadgerConfig
+	RequestStore *RequestStoreConfig
+	Queue        *QueueConfig
+	Collection   *CollectionConfig
+	// UnfetchedScanFreqMilliseconds sets how often the crawler should scan the list of fetched
+	// urls, checking links for unfetched urls. this "rehydrates" the crawler with urls that
+	// might be missed while avoiding duplicate fetching. default value of 0 disables the check
+	UnfetchedScanFreqMilliseconds int
 }
 
-// ApplyConfigs takes zero or more configuration functions to produce
+// RequestStoreConfig holds configuration details for a request store
+type RequestStoreConfig struct {
+	Type string
+}
+
+// QueueConfig holds configuration details for a Queue
+type QueueConfig struct {
+	Type string
+}
+
+// CollectionConfig configures the on-disk collection. There can be at most
+// one collection per walk process
+type CollectionConfig struct {
+	// LocalDirs is a slice of locations on disk to check for walks
+	LocalDirs []string
+}
+
+// ApplyCoordinatorConfigs takes zero or more configuration functions to produce
 // a single configuration
-func ApplyConfigs(configs ...func(c *Config)) *Config {
+func ApplyCoordinatorConfigs(configs ...func(c *CoordinatorConfig)) *CoordinatorConfig {
 	// combine configurations with default
-	cfg := DefaultConfig()
+	cfg := DefaultCoordinatorConfig()
 	for _, o := range configs {
 		o(cfg)
 	}
 	return cfg
 }
 
-// DefaultConfig returns the default configuration
-func DefaultConfig() *Config {
-	return &Config{
-		Job: &JobConfig{
-			Crawl:            true,
-			Domains:          []string{"https://datatogether.org"},
-			Seeds:            []string{"https://datatogether.org"},
-			MaxAttempts:      3,
-			StopAfterEntries: 5,
-			DoneScanMilli:    30000,
-		},
+// DefaultCoordinatorConfig returns the default configuration for a worker
+func DefaultCoordinatorConfig() *CoordinatorConfig {
+	return &CoordinatorConfig{
 		Collection: &CollectionConfig{
 			// default to checking local directory for collections
 			LocalDirs: []string{"."},
 		},
-		Workers: []*WorkerConfig{
-			&WorkerConfig{
-				Type:                  "local",
-				Parallelism:           2,
-				DelayMilli:            500,
-				Polite:                true,
-				RecordResponseHeaders: false,
-				RecordRedirects:       true,
-			},
-		},
-		ResourceHandlers: []*ResourceHandlerConfig{},
-		Badger:           NewBadgerConfig(),
-		// DestPath: "sitemap.json",
+		Badger: NewBadgerConfig(),
 	}
 }
 
-// ErrNoBadgerConfig is the result of attempting to connect to a badgerDB
-// without one configured
-var ErrNoBadgerConfig = fmt.Errorf("badger is not configured")
-
-// BadgerDB returns the badger DB connection, creating a default-configured
-// badger store if one doesn't exist
-func (cfg *Config) BadgerDB() (*badger.DB, error) {
-	if cfg.Badger == nil {
-		return nil, ErrNoBadgerConfig
-	}
-	return cfg.Badger.DB()
-}
-
-// JSONConfigFromFilepath returns a func that reads a json-encoded
+// JSONCoordinatorConfigFromFilepath returns a func that reads a json-encoded
 // config if the file specified by filepath exists, failing silently if no
 // file is present. If a file is present but not valid json, the program panics
-func JSONConfigFromFilepath(path string) func(*Config) {
-	return func(c *Config) {
-		cfg, err := ReadJSONConfigFile(path)
-		if err != nil {
+func JSONCoordinatorConfigFromFilepath(path string) func(*CoordinatorConfig) {
+	return func(c *CoordinatorConfig) {
+		cfg := &CoordinatorConfig{}
+		if err := readJSONFile(path, cfg); err != nil {
 			panic(err)
 		}
 		log.Infof("using config file: %s", path)
@@ -89,20 +71,18 @@ func JSONConfigFromFilepath(path string) func(*Config) {
 	}
 }
 
-// ReadJSONConfigFile reads a configuration JSON file
-func ReadJSONConfigFile(path string) (*Config, error) {
+// readJSONFile reads a configuration JSON file
+func readJSONFile(path string, dest interface{}) error {
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
-		err = fmt.Errorf("error reading configuration file at path: %s: %s", path, err.Error())
-		return nil, err
+		return fmt.Errorf("error reading json file at path: %s: %s", path, err.Error())
 	}
 
-	cfg := &Config{}
-	if err := json.Unmarshal(data, cfg); err != nil {
-		err = fmt.Errorf("error parsing configuration file at path: %s: %s", path, err.Error())
+	if err := json.Unmarshal(data, dest); err != nil {
+		return fmt.Errorf("error parsing json file at path: %s: %s", path, err.Error())
 	}
 
-	return cfg, nil
+	return nil
 }
 
 // JobConfig holds all Job configuration details
@@ -120,6 +100,8 @@ type JobConfig struct {
 	Domains []string
 	// Ignore is a list of url patterns to ignore
 	IgnorePatterns []string
+	// How frequently to check to see if a job is done, in milliseconds
+	DoneScanMilli int
 	// DelayMilli determines how long to wait between fetches for a given worker
 	DelayMilli int
 	// StopAfterEntries kills the crawler after a specified number of urls have
@@ -127,28 +109,52 @@ type JobConfig struct {
 	StopAfterEntries int
 	// StopUrl will stop the crawler after crawling a given URL
 	StopURL string
-	// UnfetchedScanFreqMilliseconds sets how often the crawler should scan the list of fetched
-	// urls, checking links for unfetched urls. this "rehydrates" the crawler with urls that
-	// might be missed while avoiding duplicate fetching. default value of 0 disables the check
-	UnfetchedScanFreqMilliseconds int
 	// BackoffResponseCodes is a list of response codes that when encountered will add
 	// half the value of of CrawlDelayMilliseconds per request, slowing the crawl in response
 	// every minute
 	BackoffResponseCodes []int
 	// MaxAttempts is the maximum number of times to try a url before giving up
 	MaxAttempts int
-	// How frequently to check to see if crawl is done, in milliseconds
-	DoneScanMilli int
+
+	// Workers specifies configuration details for workers this job would like to
+	// be sent to. The coordinator that orchestrates this job will take care of
+	// worker allocation
+	Workers []*WorkerConfig
+	// ResourceHandler specifies where the results of completed requests should
+	// be routed to. The coordinator that orchestarates this job will take care
+	// of ResourceHandler allocation & routing
+	ResourceHandlers []*ResourceHandlerConfig
 }
 
-// RequestStoreConfig holds configuration details for a request store
-type RequestStoreConfig struct {
-	Type string
+// DefaultJobConfig creates a job configuration
+func DefaultJobConfig() *JobConfig {
+	return &JobConfig{
+		Workers: []*WorkerConfig{
+			&WorkerConfig{
+				Type:                  "local",
+				Parallelism:           2,
+				DelayMilli:            500,
+				Polite:                true,
+				RecordResponseHeaders: false,
+				RecordRedirects:       true,
+			},
+		},
+		ResourceHandlers: []*ResourceHandlerConfig{},
+	}
 }
 
-// QueueConfig holds configuration details for a Queue
-type QueueConfig struct {
-	Type string
+// JSONJobConfigFromFilepath returns a func that reads a json-encoded
+// config if the file specified by filepath exists, failing silently if no
+// file is present. If a file is present but not valid json, the program panics
+func JSONJobConfigFromFilepath(path string) func(*JobConfig) {
+	return func(c *JobConfig) {
+		cfg := &JobConfig{}
+		if err := readJSONFile(path, cfg); err != nil {
+			panic(err)
+		}
+		log.Infof("using config file: %s", path)
+		*c = *cfg
+	}
 }
 
 // WorkerConfig holds configuration details for a request store
@@ -175,11 +181,4 @@ type ResourceHandlerConfig struct {
 	// Prefix implements any namespacing for this config
 	// not used by all ResourceHandlers
 	Prefix string
-}
-
-// CollectionConfig configures the on-disk collection. There can be at most
-// one collection per walk process
-type CollectionConfig struct {
-	// LocalDirs is a slice of locations on disk to check for walks
-	LocalDirs []string
 }

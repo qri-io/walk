@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/datatogether/cdxj"
+	"github.com/dgraph-io/badger"
 	"github.com/ugorji/go/codec"
 )
 
@@ -26,9 +27,9 @@ type ResourceFinalizer interface {
 }
 
 // NewResourceHandlers creates a slice of ResourceHandlers from a config
-func NewResourceHandlers(cfg *Config) (rhs []ResourceHandler, err error) {
-	for _, c := range cfg.ResourceHandlers {
-		rh, err := NewResourceHandler(cfg, c)
+func NewResourceHandlers(db *badger.DB, cfgs []*ResourceHandlerConfig) (rhs []ResourceHandler, err error) {
+	for _, c := range cfgs {
+		rh, err := NewResourceHandler(db, c)
 		if err != nil {
 			return nil, err
 		}
@@ -39,16 +40,15 @@ func NewResourceHandlers(cfg *Config) (rhs []ResourceHandler, err error) {
 }
 
 // NewResourceHandler creates a ResourceHandler from a config
-func NewResourceHandler(c *Config, cfg *ResourceHandlerConfig) (ResourceHandler, error) {
+func NewResourceHandler(db *badger.DB, cfg *ResourceHandlerConfig) (ResourceHandler, error) {
 	switch strings.ToUpper(cfg.Type) {
 	case "MEM":
 		return &MemResourceHandler{}, nil
 	case "CBOR":
 		return NewCBORResourceFileWriter(cfg.DestPath)
 	case "SITEMAP":
-		db, err := c.BadgerDB()
-		if err != nil {
-			return nil, err
+		if db == nil {
+			return nil, ErrNoBadgerConfig
 		}
 		return NewSitemapGenerator(cfg.Prefix, cfg.DestPath, db), nil
 	default:
