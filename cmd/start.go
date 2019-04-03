@@ -25,7 +25,7 @@ var StartCmd = &cobra.Command{
 			fmt.Printf("error getting config: %s", err.Error())
 		}
 
-		coord, stop, err := lib.NewWalk(lib.JSONConfigFromFilepath(cfgPath))
+		coord, stop, err := lib.NewWalkJob(lib.JSONConfigFromFilepath(cfgPath))
 		if err != nil {
 			fmt.Print(err.Error())
 			return
@@ -38,9 +38,6 @@ var StartCmd = &cobra.Command{
 		}
 		// log.Infof("crawl took: %f hours. wrote %d urls", time.Since(crawl.start).Hours(), crawl.urlsWritten)
 	},
-}
-
-func init() {
 }
 
 func stopOnSigKill(stop chan bool) {

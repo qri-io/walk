@@ -30,7 +30,7 @@ type MemQueue struct {
 // NewMemQueue initializes a new MemQueue
 func NewMemQueue() *MemQueue {
 	return &MemQueue{
-		channel: make(chan *Request),
+		channel: make(chan *Request, 150),
 		OnPush:  func(r *Request) {},
 		OnPop:   func(r *Request) {},
 	}

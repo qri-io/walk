@@ -18,6 +18,8 @@ import (
 
 // Resource is data associated with a given URL at a point in time
 type Resource struct {
+	// Unique identifier for the crawl job that created this resource
+	JobID string `json:"jobID,omitempty"`
 	// A Url is uniquely identified by URI string without
 	// any normalization. Url strings must always be absolute.
 	URL string `json:"url"`
@@ -45,10 +47,12 @@ type Resource struct {
 	Links []string `json:"links,omitempty"`
 	// RedirectTo speficies where this url redirects to, cannonicalized
 	RedirectTo string `json:"redirectTo,omitempty"`
+	// RedirectTo speficies where this url redirects from, cannonicalized
+	RedirectFrom string `json:"redirectFrom,omitempty"`
 	// Error contains any fetching error string
 	Error string `json:"error,omitempty"`
 	// contents of response body
-	Body []byte
+	Body []byte `json:"body,omitempty"`
 }
 
 // HeadersMap formats u.Headers (a string slice) as a map[header]value
@@ -62,20 +66,40 @@ func (u *Resource) HeadersMap() (headers map[string]string) {
 	return
 }
 
+// Meta returns a shallow copy of the resource without body bytes
+func (u *Resource) Meta() *Resource {
+	return &Resource{
+		JobID:           u.JobID,
+		URL:             u.URL,
+		Timestamp:       u.Timestamp,
+		RequestDuration: u.RequestDuration,
+		Status:          u.Status,
+		ContentType:     u.ContentType,
+		ContentSniff:    u.ContentSniff,
+		ContentLength:   u.ContentLength,
+		Title:           u.Title,
+		Headers:         u.Headers,
+		Hash:            u.Hash,
+		Links:           u.Links,
+		RedirectTo:      u.RedirectTo,
+		Error:           u.Error,
+	}
+}
+
 // HandleResponse populates a resource based on an HTTP response
 func (u *Resource) HandleResponse(started time.Time, res *http.Response, recordHeaders bool) (err error) {
 	var doc *goquery.Document
 
 	defer res.Body.Close()
-	body, err := ioutil.ReadAll(res.Body)
+	u.Body, err = ioutil.ReadAll(res.Body)
 	if err != nil {
 		return
 	}
 
 	u.Status = res.StatusCode
-	u.ContentLength = int64(len(body))
+	u.ContentLength = int64(len(u.Body))
 	u.ContentType = res.Header.Get("Content-Type")
-	u.ContentSniff = http.DetectContentType(body)
+	u.ContentSniff = http.DetectContentType(u.Body)
 	u.Timestamp = time.Now()
 
 	if recordHeaders {
@@ -86,7 +110,7 @@ func (u *Resource) HandleResponse(started time.Time, res *http.Response, recordH
 		u.RequestDuration = u.Timestamp.Sub(started)
 		log.Debugf("%s took %s", u.URL, u.RequestDuration.String())
 	}
-	if mh, e := multihash.Sum(body, multihash.SHA2_256, -1); e == nil {
+	if mh, e := multihash.Sum(u.Body, multihash.SHA2_256, -1); e == nil {
 		u.Hash = mh.String()
 	}
 
@@ -94,7 +118,7 @@ func (u *Resource) HandleResponse(started time.Time, res *http.Response, recordH
 	// sometimes xhtml documents can come back as text/plain, thus the text/plain addition
 	if u.ContentSniff == "text/html; charset=utf-8" || u.ContentSniff == "text/plain; charset=utf-8" {
 		// Process the body to find links
-		doc, err = goquery.NewDocumentFromReader(bytes.NewBuffer(body))
+		doc, err = goquery.NewDocumentFromReader(bytes.NewBuffer(u.Body))
 		if err != nil {
 			return
 		}

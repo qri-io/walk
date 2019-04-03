@@ -1,8 +1,14 @@
 package lib
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +31,8 @@ type WorkCoordinator interface {
 // completed work back to the coordinator, which sends the created resources to any
 // registered resource handlers
 type Coordinator struct {
+	// id for this crawl
+	jobID string
 	// time crawler started
 	start time.Time
 	// how many urls have been fetched and written to urls
@@ -45,10 +53,52 @@ type Coordinator struct {
 	// if Backoff is enabled this can get higher than cfg.CrawlDelayMilliseconds
 	crawlDelay time.Duration
 
+	// unexported channel to send stop signal on
+	stop chan bool
 	// flag indicating crawler is stopping
 	stopping bool
 	// finished is a count of the total number of urls finished
 	finished int
+}
+
+func newJobID() string {
+	return strconv.Itoa(1)
+}
+
+// NewWalkJob creates a new walk write process from a given set of configurations
+// if no configuration is provided, the default is used
+// start the walk by calling Start on the returned coordinator
+// halt the walk by sending a value on the returned stop channel
+func NewWalkJob(configs ...func(*Config)) (coord *Coordinator, stop chan bool, err error) {
+	// combine configurations with default
+	cfg := ApplyConfigs(configs...)
+
+	jobID := newJobID()
+
+	// create queue, store, workers, and handlers
+	// TODO - needs to leverage config
+	queue := NewMemQueue()
+	// TODO - needs to leverage config
+	frs := NewMemRequestStore()
+	ws, err := NewWorkers(cfg.Workers)
+	if err != nil {
+		return
+	}
+	hs, err := NewResourceHandlers(cfg)
+	if err != nil {
+		return
+	}
+
+	// create coodinator
+	coord = NewCoordinator(jobID, cfg.Coordinator, queue, frs, hs)
+	stop = make(chan bool)
+
+	// start workers
+	for _, w := range ws {
+		w.Start(coord)
+	}
+
+	return
 }
 
 // Config exposes the coordinator configuration
@@ -57,8 +107,9 @@ func (c *Coordinator) Config() *CoordinatorConfig {
 }
 
 // NewCoordinator creates a Coordinator
-func NewCoordinator(cfg *CoordinatorConfig, q Queue, frs RequestStore, rh []ResourceHandler) *Coordinator {
+func NewCoordinator(jobID string, cfg *CoordinatorConfig, q Queue, frs RequestStore, rh []ResourceHandler) *Coordinator {
 	c := &Coordinator{
+		jobID:      jobID,
 		cfg:        cfg,
 		queue:      q,
 		frs:        frs,
@@ -97,12 +148,14 @@ func (c *Coordinator) ResourceHandlers() []ResourceHandler {
 // Start kicks off coordinated fetching, seeding the queue & store & awaiting responses
 // start will block until a signal is received on the stop channel, keep in mind
 // a number of conditions can stop the crawler depending on configuration
-func (c *Coordinator) Start(stop chan bool) error {
+func (c *Coordinator) Start(stop chan bool) (err error) {
 	var (
+		seedr                           io.Reader
 		unfetchedT, backoffT, doneScanT *time.Ticker
 		finalizerErrs                   []error
 		wg                              sync.WaitGroup
 	)
+	c.stop = stop
 
 	if len(c.cfg.BackoffResponseCodes) > 0 {
 		backoffT = time.NewTicker(time.Minute)
@@ -116,43 +169,55 @@ func (c *Coordinator) Start(stop chan bool) error {
 		}()
 	}
 
+	if seedr, err = c.enqueSeedsPath(); err != nil {
+		return fmt.Errorf("getting SeedsPath: %s", err.Error())
+	}
+
 	if c.cfg.DoneScanMilli > 0 {
 		doneScanT = time.NewTicker(time.Millisecond * time.Duration(c.cfg.DoneScanMilli))
+		log.Debugf("performing done scan checks every %d secs.", c.cfg.DoneScanMilli/1000)
 		go func() {
-		CHECK:
 			for range doneScanT.C {
 				l, err := c.queue.Len()
 				if err != nil {
 					log.Errorf("error getting queue length: %s", err.Error())
-					continue CHECK
+					continue
 				}
 				if l == 0 {
 					reqs, err := c.frs.List(-1, 0)
 					if err != nil {
 						log.Errorf("error reading: %s", err.Error())
-						continue CHECK
+						continue
 					}
 					for _, r := range reqs {
 						if !(r.Status == RequestStatusDone || r.Status == RequestStatusFailed) {
-							continue CHECK
+							continue
 						}
 					}
 					log.Info("no urls remain for checking, nothing left in queue, we done")
-					stop <- true
+					c.stop <- true
+					return
 				}
 			}
 		}()
 	}
 
 	c.start = time.Now()
+
+	if seedr != nil {
+		go func(s *bufio.Scanner) {
+			for s.Scan() {
+				c.enqueue(&Request{URL: s.Text()})
+			}
+		}(bufio.NewScanner(seedr))
+	}
+
 	for _, url := range c.cfg.Seeds {
-		if c.urlStringIsCandidate(url) {
-			c.enqueue(&Request{URL: url})
-		}
+		c.enqueue(&Request{URL: url})
 	}
 
 	// block until receive on stop
-	<-stop
+	<-c.stop
 
 	// TODO - send stop signal to workers
 
@@ -188,6 +253,33 @@ func (c *Coordinator) Start(stop chan bool) error {
 	return nil
 }
 
+func (c *Coordinator) enqueSeedsPath() (r io.Reader, err error) {
+	if c.cfg.SeedsPath == "" {
+		return nil, nil
+	}
+
+	if _, err := url.ParseRequestURI(c.cfg.SeedsPath); err == nil {
+		log.Info("fetching SeedsPath URL")
+		res, err := http.Get(c.cfg.SeedsPath)
+		if err != nil {
+			return nil, err
+		}
+		data, err := ioutil.ReadAll(res.Body)
+		if err != nil {
+			return nil, err
+		}
+		res.Body.Close()
+		return bytes.NewBuffer(data), nil
+	}
+
+	log.Info("reading SeedsPath file")
+	data, err := ioutil.ReadFile(c.cfg.SeedsPath)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewBuffer(data), nil
+}
+
 // Queue gives access to the underlying queue as a channel of Fetch Requests
 func (c *Coordinator) Queue() (chan *Request, error) {
 	return c.queue.Chan()
@@ -218,9 +310,11 @@ func (c *Coordinator) Completed(rsc ...*Resource) error {
 			log.Debugf("error dequing url: %s: %s", r.URL, err.Error())
 		}
 
-		for _, l := range r.Links {
-			if c.urlStringIsCandidate(l) {
-				links[l] = true
+		if c.cfg.Crawl {
+			for _, l := range r.Links {
+				if c.urlStringIsCandidate(l) {
+					links[l] = true
+				}
 			}
 		}
 	}
@@ -240,6 +334,7 @@ func (c *Coordinator) Completed(rsc ...*Resource) error {
 
 func (c *Coordinator) enqueue(rs ...*Request) {
 	for _, r := range rs {
+		r.JobID = c.jobID
 		if c.stopping {
 			r.Status = RequestStatusFailed
 			c.frs.Put(r)
@@ -273,6 +368,14 @@ func (c *Coordinator) dequeue(rsc *Resource) error {
 		// send completed records to each handler
 		for _, h := range c.handlers {
 			go h.HandleResource(rsc)
+		}
+		if c.cfg.StopURL == fr.URL {
+			log.Infof("stop url encountered, stopping")
+			// TODO (b5): horrible hack to make sure local tests pass b/c too much parallelism
+			// should cleanup & use a channel to wait for handle resources goroutines above
+			// to finish
+			time.Sleep(time.Millisecond * 100)
+			c.stop <- true
 		}
 		return nil
 	}
@@ -323,5 +426,5 @@ func (c *Coordinator) urlStringIsCandidate(rawurl string) bool {
 }
 
 func (c *Coordinator) okResponseStatus(s int) bool {
-	return s == 200
+	return s >= http.StatusOK && s <= http.StatusPermanentRedirect
 }
