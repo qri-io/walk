@@ -36,7 +36,7 @@ There are two major components of Walk:
 
 The crawler crawls just one level (links from one particular page) at a time. The results are then sent to the coordinator/result handler, which performs some minimal processing (e.g. de-duplication of lists of returned URLs) and queues the next iterations of crawling.
 
-![Very small/blurry diagram of the jobs, workers, and results interacting with the coordinator](https://lh3.googleusercontent.com/W2HUfQXgmz-MQQfc7Z1QpeAo1dS7WqAZ8AziG-uYYVZu_GRCjXDIhgIuqcV9WVp8cFMtV-IAjWsRMqohxSWPPHowLXZritm8QHqwLiAltDBxqodZX54Ogo3mkOmYCUKgGADN5hjx8RvCbh8-adJfqjRZkmCFjNgVRFha_5V-pa9PiSTAGkB3I2GphzQT9qJ4GDgplogezKWYX43kWzszcsofEHhkow4LPvV7xVYHh3HSo-AbKtKdD8q_ZAqO2gmn2h_2HXv8SPqqjH2Rbft3GwHcIPrSaFqInwhryzSakkHLrDA1R6AcC_9CxGh3t_fCvJSPmuxMK15dzuWnauoD2MlAcS_AlhOmtQFP7p-zW-OWpzqgMlYtnMYYrcXWefycnaf-Bv46sU_xGae_-ex3yk2TgPCmSwVVx8l3EK7aiSDYM0rqGCZS6w5SXYBlTVXnn4XYv2qToabUX0IDFlopuvMmzCiAg_gzNeou0_Q_8Zx56cK2yMnJkJp9G_oHu-ndQ2hJRTD4dcV0LcjQoFwZ86jurcTcjc0mpv-4caHgxDEzXQVgzscCwhSvRLHGcjxZNghOSFknXSOIqCmVVB_c9EQv3K4scHXliJkYfyr00CRAYG-UeoDWhylWTETMpktWnlt0VaOTTrn6sVfuueMFIBGGxE6jY_wq=w317-h99-no)
+![Diagram of the jobs, workers, and results interacting with the coordinator](https://i.imgur.com/oeyPp9m.png)
 
 #### Interaction
 Walk's coordinator runs on a cloud server in order to minimize potential disruption of a job.
