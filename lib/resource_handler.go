@@ -45,12 +45,12 @@ func NewResourceHandler(db *badger.DB, cfg *ResourceHandlerConfig) (ResourceHand
 	case "MEM":
 		return &MemResourceHandler{}, nil
 	case "CBOR":
-		return NewCBORResourceFileWriter(cfg.DestPath)
+		return NewCBORResourceFileWriter(cfg.DstPath)
 	case "SITEMAP":
 		if db == nil {
 			return nil, ErrNoBadgerConfig
 		}
-		return NewSitemapGenerator(cfg.Prefix, cfg.DestPath, db), nil
+		return NewSitemapGenerator(cfg.Prefix, cfg.DstPath, db), nil
 	default:
 		return nil, fmt.Errorf("unrecognized resource handler type: %s", cfg.Type)
 	}

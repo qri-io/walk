@@ -59,15 +59,15 @@ func DefaultCoordinatorConfig() *CoordinatorConfig {
 
 // JSONCoordinatorConfigFromFilepath returns a func that reads a json-encoded
 // config if the file specified by filepath exists, failing silently if no
-// file is present. If a file is present but not valid json, the program panics
+// file is present
 func JSONCoordinatorConfigFromFilepath(path string) func(*CoordinatorConfig) {
 	return func(c *CoordinatorConfig) {
 		cfg := &CoordinatorConfig{}
-		if err := readJSONFile(path, cfg); err != nil {
-			panic(err)
+		// note that we're ignoring the error returned by readJSONFile
+		if err := readJSONFile(path, cfg); err == nil {
+			log.Infof("using config file: %s", path)
+			*c = *cfg
 		}
-		log.Infof("using config file: %s", path)
-		*c = *cfg
 	}
 }
 
@@ -129,32 +129,38 @@ type JobConfig struct {
 // DefaultJobConfig creates a job configuration
 func DefaultJobConfig() *JobConfig {
 	return &JobConfig{
+		Domains: []string{
+			"https://esrl.noaa.gov",
+		},
+		Seeds: []string{
+			"https://esrl.noaa.gov/",
+		},
+		DoneScanMilli: 30000,
+		MaxAttempts:   3,
+		Crawl:         true,
 		Workers: []*WorkerConfig{
 			&WorkerConfig{
 				Type:                  "local",
-				Parallelism:           2,
+				Parallelism:           10,
 				DelayMilli:            500,
 				Polite:                true,
 				RecordResponseHeaders: false,
 				RecordRedirects:       true,
 			},
 		},
-		ResourceHandlers: []*ResourceHandlerConfig{},
+		ResourceHandlers: []*ResourceHandlerConfig{
+			&ResourceHandlerConfig{Type: "sitemap", DstPath: "sitemap.json"},
+		},
 	}
 }
 
-// JSONJobConfigFromFilepath returns a func that reads a json-encoded
-// config if the file specified by filepath exists, failing silently if no
-// file is present. If a file is present but not valid json, the program panics
-func JSONJobConfigFromFilepath(path string) func(*JobConfig) {
-	return func(c *JobConfig) {
-		cfg := &JobConfig{}
-		if err := readJSONFile(path, cfg); err != nil {
-			panic(err)
-		}
-		log.Infof("using config file: %s", path)
-		*c = *cfg
+// JSONJobConfigFromFilepath reads a job config from a json file
+func JSONJobConfigFromFilepath(path string) (*JobConfig, error) {
+	cfg := &JobConfig{}
+	if err := readJSONFile(path, cfg); err != nil {
+		return nil, err
 	}
+	return cfg, nil
 }
 
 // WorkerConfig holds configuration details for a request store
@@ -176,8 +182,8 @@ type ResourceHandlerConfig struct {
 	Type string
 	// SrcPath is the path to an input site file from a previous crawl
 	SrcPath string
-	// DestPath is the path to the output site file
-	DestPath string
+	// DstPath is the path to the output site file
+	DstPath string
 	// Prefix implements any namespacing for this config
 	// not used by all ResourceHandlers
 	Prefix string

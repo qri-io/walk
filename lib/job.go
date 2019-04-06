@@ -204,7 +204,7 @@ func (c *Job) Seeds() (seeds chan string, err error) {
 		close(seeds)
 	}(c, seedr)
 
-	return nil, fmt.Errorf("not finished")
+	return
 }
 
 func (c *Job) enqueSeedsPath() (r io.Reader, err error) {

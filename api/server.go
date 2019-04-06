@@ -10,16 +10,9 @@ import (
 
 // Server wraps a collection, turning it into an API server
 type Server struct {
-	Jobs       []*lib.Job
-	collection lib.Collection
-	server     *http.Server
-}
-
-// NewServer creates a new server
-func NewServer(col lib.Collection) *Server {
-	return &Server{
-		collection: col,
-	}
+	Coordinator lib.Coordinator
+	Collection  lib.Collection
+	server      *http.Server
 }
 
 // Serve Blocks
@@ -57,7 +50,7 @@ func NewServerRoutes(s *Server) *http.ServeMux {
 	m.Handle("/", s.middleware(NotFoundHandler))
 	m.Handle("/status", s.middleware(HealthCheckHandler))
 
-	ch := CollectionHandlers{collection: s.collection}
+	ch := CollectionHandlers{collection: s.Collection}
 	m.Handle("/collection", s.middleware(ch.HandleListWalks))
 	m.Handle("/collection/", s.middleware(ch.HandleWalkIndex))
 	m.Handle("/captures", s.middleware(ch.HandleCollectionIndex))
@@ -67,8 +60,9 @@ func NewServerRoutes(s *Server) *http.ServeMux {
 	m.Handle("/captures/raw/", s.middleware(ch.HandleRawResource))
 	m.Handle("/captures/resolved/", s.middleware(ch.HandleResolvedResource))
 
-	m.Handle("/jobs", s.middleware(ch.HandleListJobs))
-	m.Handle("/jobs/", s.middleware(ch.HandleJobs))
+	jh := JobHandlers{coord: s.Coordinator}
+	m.Handle("/jobs", s.middleware(jh.HandleListJobs))
+	m.Handle("/jobs/", s.middleware(jh.HandleJobs))
 
 	return m
 }

@@ -1,12 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
-	"fmt"
-	"io/ioutil"
-	"os"
-
-	"github.com/qri-io/walk/lib"
 	"github.com/spf13/cobra"
 )
 
@@ -17,29 +11,29 @@ var ConfigCmd = &cobra.Command{
 	Long: `config helps you figure out what your current configuration looks like,
 if no configuration exists, config prints the default configuration`,
 	Run: func(cmd *cobra.Command, args []string) {
-		cfgPath, err := cmd.Flags().GetString("config")
-		if err != nil {
-			fmt.Printf("error getting config: %s", err.Error())
-			os.Exit(1)
-		}
+		// cfgPath, err := cmd.Flags().GetString("config")
+		// if err != nil {
+		// 	fmt.Printf("error getting config: %s", err.Error())
+		// 	os.Exit(1)
+		// }
 
-		cfg := &lib.Config{}
-		if data, err := ioutil.ReadFile(cfgPath); err != nil {
-			cfg = lib.DefaultConfig()
-		} else {
-			if err := json.Unmarshal(data, cfg); err != nil {
-				cfg = lib.DefaultConfig()
-			}
-		}
+		// cfg := &lib.CoordinatorConfig{}
+		// if data, err := ioutil.ReadFile(cfgPath); err != nil {
+		// 	cfg = lib.DefaultConfig()
+		// } else {
+		// 	if err := json.Unmarshal(data, cfg); err != nil {
+		// 		cfg = lib.DefaultConfig()
+		// 	}
+		// }
 
-		data, err := json.MarshalIndent(cfg, "", "  ")
-		if err != nil {
-			fmt.Printf("error marshaling configuration: %s", err.Error())
-			os.Exit(1)
-		}
+		// data, err := json.MarshalIndent(cfg, "", "  ")
+		// if err != nil {
+		// 	fmt.Printf("error marshaling configuration: %s", err.Error())
+		// 	os.Exit(1)
+		// }
 
-		fmt.Print(string(data))
-		// log.Infof("crawl took: %f hours. wrote %d urls", time.Since(crawl.start).Hours(), crawl.urlsWritten)
+		// fmt.Print(string(data))
+		// // log.Infof("crawl took: %f hours. wrote %d urls", time.Since(crawl.start).Hours(), crawl.urlsWritten)
 	},
 }
 

@@ -97,7 +97,7 @@ func (coord *coordinator) Job(id string) (*Job, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("not found")
+	return nil, fmt.Errorf("coord: job not found")
 }
 
 // NewJob creates and starts a job
@@ -159,7 +159,7 @@ func (coord *coordinator) StartJob(id string) error {
 		// TODO (b5): This is checking the _entire_ queue & frs. won't work when multiple
 		// jobs are running (will require both to completely finish before "done" is ever triggered)
 		doneScanT := time.NewTicker(time.Millisecond * time.Duration(job.cfg.DoneScanMilli))
-		log.Debugf("performing done scan checks every %d secs.", job.cfg.DoneScanMilli/1000)
+		log.Debugf("coord: performing done scan checks every %d secs.", job.cfg.DoneScanMilli/1000)
 		go func() {
 			for range doneScanT.C {
 				l, err := coord.queue.Len()
@@ -187,6 +187,7 @@ func (coord *coordinator) StartJob(id string) error {
 		}()
 	}
 
+	log.Infof("coord: starting job: %s", id)
 	if err := job.Start(); err != nil {
 		job.Errored(err)
 		return err
@@ -197,8 +198,16 @@ func (coord *coordinator) StartJob(id string) error {
 
 // Shutdown halts the coordinator
 func (coord *coordinator) Shutdown() error {
+	log.Debug("coord: shutting down")
 	// TODO (b5): drain existing queue into badger
 	coord.shutdown <- true
+	for _, rhs := range coord.jobHandlers {
+		for _, rh := range rhs {
+			if finalizer, ok := rh.(ResourceFinalizer); ok {
+				finalizer.FinalizeResources()
+			}
+		}
+	}
 	return nil
 }
 
@@ -262,10 +271,11 @@ func (coord *coordinator) CompletedResources(rsc ...*Resource) error {
 
 	// handle resources and create a deduplicated map
 	// of unique candidate urls from all responses
-	links := map[string]bool{}
+	links := map[string]string{}
+	linkCount := 0
 	for _, r := range rsc {
 		if err := coord.dequeue(r); err != nil {
-			log.Debugf("error dequing url: %s: %s", r.URL, err.Error())
+			log.Debugf("coord: error dequing url: %s: %s", r.URL, err.Error())
 		}
 		job, err := coord.Job(r.JobID)
 		if err != nil {
@@ -274,20 +284,22 @@ func (coord *coordinator) CompletedResources(rsc ...*Resource) error {
 		}
 		if job.cfg.Crawl {
 			for _, l := range r.Links {
+				linkCount++
 				if job.urlStringIsCandidate(l) {
-					links[l] = true
+					links[l] = r.JobID
 				}
 			}
 		}
 	}
 
-	for url := range links {
+	log.Debugf("coord: completed %d resources with %d/%d links", len(rsc), len(links), linkCount)
+	for url, jobID := range links {
 		r, err := coord.frs.Get(url)
-		if err != nil {
-			log.Debugf("err getting url: %s: %s", url, err.Error())
+		if err != nil && err != ErrNotFound {
+			log.Debugf("coord: err getting url: %s: %s", url, err.Error())
 		}
 		if r == nil {
-			coord.enqueue(&Request{URL: url, JobID: r.JobID})
+			coord.enqueue(&Request{URL: url, JobID: jobID})
 		}
 	}
 
@@ -302,7 +314,7 @@ func (coord *coordinator) enqueue(rs ...*Request) {
 			continue
 		}
 
-		log.Debugf("enqueue: %s", r.URL)
+		log.Debugf("coord: enqueue: %s", r.URL)
 		r.Status = RequestStatusQueued
 		coord.frs.Put(r)
 		coord.queue.Push(r)
@@ -314,7 +326,7 @@ func (coord *coordinator) dequeue(rsc *Resource) error {
 	if err == ErrNotFound {
 		fr = &Request{URL: rsc.URL}
 	} else if err != nil {
-		log.Debugf("err getting url: %s: %s", rsc.URL, err.Error())
+		log.Debugf("coord: err getting url: %s: %s", rsc.URL, err.Error())
 		return err
 	}
 
@@ -328,7 +340,7 @@ func (coord *coordinator) dequeue(rsc *Resource) error {
 	}
 
 	if job.okResponseStatus(fr.PrevResStatus) {
-		log.Debugf("dequeue: %s", fr.URL)
+		log.Debugf("coord: dequeue: %s", fr.URL)
 
 		job.finished++
 		fr.Status = RequestStatusDone
@@ -337,7 +349,7 @@ func (coord *coordinator) dequeue(rsc *Resource) error {
 			go h.HandleResource(rsc)
 		}
 		if job.cfg.StopURL == fr.URL {
-			log.Infof("stop url encountered, stopping")
+			log.Infof("coord: stop url encountered, stopping")
 			// TODO (b5): horrible hack to make sure local tests pass b/c too much parallelism
 			// should cleanup & use a channel to wait for handle resources goroutines above
 			// to finish

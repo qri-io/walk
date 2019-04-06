@@ -59,6 +59,7 @@ func (g *SitemapGenerator) HandleResource(r *Resource) {
 
 // FinalizeResources writes a json sitemap file to outpath
 func (g *SitemapGenerator) FinalizeResources() error {
+	log.Info("sitemap: finalizing")
 	if err := g.Generate(g.dstPath); err != nil {
 		return err
 	}
