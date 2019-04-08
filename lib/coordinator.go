@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -25,7 +26,9 @@ type Coordinator interface {
 	StartJob(id string) error
 	// Queue returns a channel of Requests, which contain urls that need
 	// to be fetched & turned into one or more resources
-	Queue() (chan *Request, error)
+	Queue() Queue
+	// Coordinators must store a set of requests they've made
+	RequestStore() RequestStore
 	// Completed work is submitted to the Job by submitting one or more
 	// constructed resources
 	CompletedResources(rsc ...*Resource) error
@@ -43,8 +46,6 @@ func NewCoordinator(configs ...func(*CoordinatorConfig)) (coord Coordinator, err
 	// create queue, store, workers, and handlers
 	// TODO - needs to leverage config
 	queue := NewMemQueue()
-	// TODO - needs to leverage config
-	frs := NewMemRequestStore()
 
 	var db *badger.DB
 	if cfg.Badger != nil {
@@ -53,35 +54,58 @@ func NewCoordinator(configs ...func(*CoordinatorConfig)) (coord Coordinator, err
 		}
 	}
 
+	// TODO - needs to leverage config
+	frs := NewBadgerRequestStore(db)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
 	coord = &coordinator{
-		queue:       queue,
-		frs:         frs,
+		ctx:    ctx,
+		cancel: cancel,
+
+		queue:  queue,
+		frs:    frs,
+		badger: db,
+
 		jobHandlers: map[string][]ResourceHandler{},
 		jobWorkers:  map[string][]Worker{},
-		badger:      db,
-		shutdown:    make(chan bool),
+
+		processingChanges: make(chan int, 8),
+
+		shutdown: make(chan bool),
 	}
+
+	go func(coord *coordinator) {
+		for {
+			select {
+			case add := <-coord.processingChanges:
+				coord.processing += add
+			case <-coord.ctx.Done():
+				return
+			}
+		}
+	}(coord.(*coordinator))
 
 	return
 }
 
 // coordinator implements the Coordinator interface
 type coordinator struct {
-	jobs []*Job
-	// mapping of a job's handlers
-	jobHandlers map[string][]ResourceHandler
-	// mapping of a job's workers
-	jobWorkers map[string][]Worker
-	// queue of resources to fetch
-	queue Queue
-	// store of request history
-	frs RequestStore
-	// channel to trigger coordinator shutdown
-	shutdown chan bool
-	// flag indicating coordinator is stopping
-	stopping bool
-	// badger DB handle
-	badger *badger.DB
+	ctx    context.Context // execution context
+	queue  Queue           // queue of resources to fetch
+	frs    RequestStore    // store of request history
+	badger *badger.DB      // coordinator requires a badger db connection
+
+	jobs        []*Job                       // jobs owned by the coordinator
+	jobHandlers map[string][]ResourceHandler // mapping of a job's handlers
+	jobWorkers  map[string][]Worker          // mapping of a job's workers
+
+	processing        int      // number of urls currently being processed
+	processingChanges chan int // channel to modify processing value
+
+	cancel   func()    // context cancel funce
+	shutdown chan bool // channel to trigger coordinator shutdown
+	stopping bool      // flag indicating coordinator is stopping
 }
 
 // Jobs lists all jobs being coordinated
@@ -102,7 +126,7 @@ func (coord *coordinator) Job(id string) (*Job, error) {
 
 // NewJob creates and starts a job
 func (coord *coordinator) NewJob(cfg *JobConfig) (*Job, error) {
-	job := NewJob(cfg, coord)
+	job := newJob(cfg, coord)
 	coord.jobs = append(coord.jobs, job)
 
 	ws, err := NewWorkers(cfg.Workers)
@@ -168,7 +192,7 @@ func (coord *coordinator) StartJob(id string) error {
 					continue
 				}
 				if l == 0 {
-					reqs, err := coord.frs.List(-1, 0)
+					reqs, err := coord.frs.ListRequests(-1, 0)
 					if err != nil {
 						log.Errorf("error reading: %s", err.Error())
 						continue
@@ -178,9 +202,13 @@ func (coord *coordinator) StartJob(id string) error {
 							continue
 						}
 					}
+					if coord.processing > 0 {
+						continue
+					}
 					log.Info("no urls remain for checking, nothing left in queue, we done")
 					// c.stop <- true
-					job.Complete()
+					// job.Complete()
+					coord.Shutdown()
 					return
 				}
 			}
@@ -199,11 +227,19 @@ func (coord *coordinator) StartJob(id string) error {
 // Shutdown halts the coordinator
 func (coord *coordinator) Shutdown() error {
 	log.Debug("coord: shutting down")
+	coord.stopping = true
+
+	// wait if there are still urls in the queue
 	// TODO (b5): drain existing queue into badger
-	coord.shutdown <- true
+	if leng, err := coord.queue.Len(); err == nil && leng > 0 {
+		coord.shutdown <- true
+	}
+	coord.cancel()
+
 	for _, rhs := range coord.jobHandlers {
 		for _, rh := range rhs {
 			if finalizer, ok := rh.(ResourceFinalizer); ok {
+				log.Infof("finalizing: %s", rh.Type())
 				finalizer.FinalizeResources()
 			}
 		}
@@ -211,45 +247,14 @@ func (coord *coordinator) Shutdown() error {
 	return nil
 }
 
-// func (coord *coordinator) JobStatusChanged(ID string, prev JobStatus) {
-
-// 	rhs, err := NewResourceHandlers(cfg.ResourceHandlers)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	job, err := coord.Job(ID)
-
-// 	rhs, err := NewResourceHandlers(cfg.ResourceHandlers)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	if err != nil {
-// 		log.Errorf("looking up job for status change: %s", err)
-// 		return
-// 	}
-
-// 	if prev == JobStatusNew && job.status == JobStatusRunning {
-// 		// TODO - read seed queue
-// 	}
-// }
-
-// // SetHandlers configures the Job's resource handlers
-// func (coord *coordinator) SetHandlers(rh []ResourceHandler) error {
-// 	// if !c.start.IsZero() {
-// 	// 	return fmt.Errorf("crawl already started")
-// 	// }
-// 	// coord.handlers = rh
-// 	return nil
-// }
-
-// ResourceHandlers exposes the coordinator's ResourceHandlers
-// func (coord *coordinator) ResourceHandlers() []ResourceHandler {
-// 	return coord.handlers
-// }
-
 // Queue gives access to the underlying queue as a channel of Fetch Requests
-func (coord *coordinator) Queue() (chan *Request, error) {
-	return coord.queue.Chan()
+func (coord *coordinator) Queue() Queue {
+	return coord.queue
+}
+
+// RequestStore exposes the coordinator's Fetch Request Store
+func (coord *coordinator) RequestStore() RequestStore {
+	return coord.frs
 }
 
 // CompletedResources sends one or more constructed resources to the coordinator
@@ -274,13 +279,13 @@ func (coord *coordinator) CompletedResources(rsc ...*Resource) error {
 	links := map[string]string{}
 	linkCount := 0
 	for _, r := range rsc {
-		if err := coord.dequeue(r); err != nil {
-			log.Debugf("coord: error dequing url: %s: %s", r.URL, err.Error())
-		}
 		job, err := coord.Job(r.JobID)
 		if err != nil {
 			log.Errorf("couldn't find job for completed resource: %s", r.URL)
 			continue
+		}
+		if err := coord.dequeue(job, r); err != nil {
+			log.Debugf("coord: error dequing url: %s: %s", r.URL, err.Error())
 		}
 		if job.cfg.Crawl {
 			for _, l := range r.Links {
@@ -294,7 +299,7 @@ func (coord *coordinator) CompletedResources(rsc ...*Resource) error {
 
 	log.Debugf("coord: completed %d resources with %d/%d links", len(rsc), len(links), linkCount)
 	for url, jobID := range links {
-		r, err := coord.frs.Get(url)
+		r, err := coord.frs.GetRequest(url)
 		if err != nil && err != ErrNotFound {
 			log.Debugf("coord: err getting url: %s: %s", url, err.Error())
 		}
@@ -310,19 +315,20 @@ func (coord *coordinator) enqueue(rs ...*Request) {
 	for _, r := range rs {
 		if coord.stopping {
 			r.Status = RequestStatusFailed
-			coord.frs.Put(r)
+			coord.frs.PutRequest(r)
 			continue
 		}
 
 		log.Debugf("coord: enqueue: %s", r.URL)
 		r.Status = RequestStatusQueued
-		coord.frs.Put(r)
+		coord.frs.PutRequest(r)
 		coord.queue.Push(r)
+		coord.processingChanges <- 1
 	}
 }
 
-func (coord *coordinator) dequeue(rsc *Resource) error {
-	fr, err := coord.frs.Get(rsc.URL)
+func (coord *coordinator) dequeue(job *Job, rsc *Resource) error {
+	fr, err := coord.frs.GetRequest(rsc.URL)
 	if err == ErrNotFound {
 		fr = &Request{URL: rsc.URL}
 	} else if err != nil {
@@ -333,11 +339,32 @@ func (coord *coordinator) dequeue(rsc *Resource) error {
 	fr.PrevResStatus = rsc.Status
 	fr.AttemptsMade++
 
-	job, err := coord.Job(rsc.JobID)
-	if err != nil {
-		log.Errorf("finding job for dequed url: %s", err)
-		return nil
-	}
+	// job, err := coord.Job(rsc.JobID)
+	// if err != nil {
+	// 	log.Errorf("finding job for dequed url: %s", err)
+	// 	return nil
+	// }
+
+	defer func() {
+		coord.processingChanges <- -1
+
+		if coord.stopping {
+			if leng, err := coord.queue.Len(); leng == 0 && err == nil {
+				// read off shutdown channel
+				<-coord.shutdown
+			}
+		}
+
+		if job.cfg.StopURL == fr.URL {
+			log.Infof("coord: stop url encountered, stopping")
+			// TODO (b5): horrible hack to make sure local tests pass b/c too much parallelism
+			// should cleanup & use a channel to wait for handle resources goroutines above
+			// to finish
+			// TODO - this will now break all sorts of stuff, clean this up
+			time.Sleep(time.Millisecond * 100)
+			coord.Shutdown()
+		}
+	}()
 
 	if job.okResponseStatus(fr.PrevResStatus) {
 		log.Debugf("coord: dequeue: %s", fr.URL)
@@ -348,15 +375,6 @@ func (coord *coordinator) dequeue(rsc *Resource) error {
 		for _, h := range coord.jobHandlers[job.ID] {
 			go h.HandleResource(rsc)
 		}
-		if job.cfg.StopURL == fr.URL {
-			log.Infof("coord: stop url encountered, stopping")
-			// TODO (b5): horrible hack to make sure local tests pass b/c too much parallelism
-			// should cleanup & use a channel to wait for handle resources goroutines above
-			// to finish
-			// TODO - this will now break all sorts of stuff, clean this up
-			time.Sleep(time.Millisecond * 100)
-			coord.shutdown <- true
-		}
 		return nil
 	}
 
@@ -366,5 +384,5 @@ func (coord *coordinator) dequeue(rsc *Resource) error {
 	}
 
 	fr.Status = RequestStatusFailed
-	return coord.frs.Put(fr)
+	return coord.frs.PutRequest(fr)
 }

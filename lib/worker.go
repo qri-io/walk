@@ -71,7 +71,7 @@ func (w *LocalWorker) Start(coord Coordinator) error {
 	w.fetchers = make([]*fetchbot.Fetcher, cfg.Parallelism)
 	w.queues = make([]*fetchbot.Queue, cfg.Parallelism)
 
-	ch, err := w.coord.Queue()
+	ch, err := w.coord.Queue().Chan()
 	if err != nil {
 		return err
 	}
@@ -104,7 +104,6 @@ func (w *LocalWorker) Start(coord Coordinator) error {
 					continue
 				}
 				i = (i + 1) % len(w.queues)
-				time.Sleep(time.Duration(w.cfg.DelayMilli) * time.Millisecond)
 			case <-w.stop:
 				for _, q := range w.queues {
 					q.Close()
@@ -154,6 +153,7 @@ func newMux(coord Coordinator, recordRedirects, recordHeaders bool) *fetchbot.Mu
 
 			log.Infof("[%d] %s %s", res.StatusCode, ctx.Cmd.Method(), r.URL)
 
+			// re-add jobID & start time from TimedCmd context
 			var st time.Time
 			if timedCmd, ok := ctx.Cmd.(*TimedCmd); ok {
 				r.JobID = timedCmd.JobID
@@ -192,7 +192,7 @@ func stopHandler(stopurl string, stop chan bool, wrapped fetchbot.Handler) fetch
 
 // NewRecordRedirectClient creates a http client with a custom checkRedirect function that
 // creates records of Redirects & sends them to the coordinator
-func NewRecordRedirectClient(wc Coordinator) *http.Client {
+func NewRecordRedirectClient(coord Coordinator) *http.Client {
 	return &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 
@@ -201,11 +201,16 @@ func NewRecordRedirectClient(wc Coordinator) *http.Client {
 
 			canurlstr, _ := NormalizeURLString(req.URL.String())
 
+			jobID := ""
+			if coordReq, err := coord.RequestStore().GetRequest(prevurl); err == nil {
+				jobID = coordReq.JobID
+			}
+
 			if prevurl != canurlstr {
 				log.Infof("[%d] %s %s -> %s", req.Response.StatusCode, prev.Method, prevurl, canurlstr)
 
-				wc.CompletedResources(&Resource{
-					// TODO - doesn't this need a jobID?
+				coord.CompletedResources(&Resource{
+					JobID:     jobID,
 					URL:       prevurl,
 					Timestamp: time.Now(),
 					Status:    req.Response.StatusCode,

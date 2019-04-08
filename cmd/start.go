@@ -75,8 +75,11 @@ func stopOnSigKill(coord lib.Coordinator) {
 		sigKilled = true
 
 		go func() {
+			remain, _ := coord.Queue().Len()
+
 			log.Infof(strings.Repeat("*", 72))
-			log.Infof("  received kill signal. stopping & writing file. this'll take a second")
+			log.Infof("  received kill signal. stopping & writing file")
+			log.Infof("  %d urls remain in the queue", remain)
 			log.Infof("  press ^C again to exit")
 			log.Infof(strings.Repeat("*", 72))
 			if err := coord.Shutdown(); err != nil {

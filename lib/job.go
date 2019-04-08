@@ -13,8 +13,8 @@ import (
 	"time"
 )
 
-// NewJob creates a Job
-func NewJob(cfg *JobConfig, coord Coordinator) *Job {
+// newJob creates a Job, called by a coordinator
+func newJob(cfg *JobConfig, coord Coordinator) *Job {
 	c := &Job{
 		ID:         newJobID(),
 		cfg:        cfg,
