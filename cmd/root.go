@@ -4,13 +4,17 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/qri-io/ioes"
 	"github.com/qri-io/walk/lib"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
 // logger
-var log = logrus.New()
+var (
+	log     = logrus.New()
+	streams = ioes.NewStdIOStreams()
+)
 
 // RootCmd is the walk command
 var RootCmd = &cobra.Command{
@@ -39,5 +43,15 @@ func init() {
 		NormalizeURLCmd,
 		ConfigCmd,
 		ServerCmd,
+		JobCmd,
 	)
+}
+
+func getCoordinator(cmd *cobra.Command) (lib.Coordinator, error) {
+	cfgPath, err := cmd.Flags().GetString("config")
+	if err != nil {
+		fmt.Printf("error getting config: %s", err.Error())
+	}
+
+	return lib.NewCoordinator(lib.JSONCoordinatorConfigFromFilepath(cfgPath))
 }

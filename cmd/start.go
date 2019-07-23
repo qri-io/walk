@@ -13,6 +13,7 @@ import (
 
 var (
 	sigKilled bool
+	jobPath   string
 )
 
 // StartCmd runs a crawl
@@ -20,19 +21,31 @@ var StartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "generate a sitemap by crawling",
 	Run: func(cmd *cobra.Command, args []string) {
-		cfgPath, err := cmd.Flags().GetString("config")
+		coord, err := getCoordinator(cmd)
 		if err != nil {
-			fmt.Printf("error getting config: %s", err.Error())
+			fmt.Fprintf(streams.ErrOut, "getting coordinator: %s", err)
+			os.Exit(1)
 		}
 
-		coord, stop, err := lib.NewWalkJob(lib.JSONConfigFromFilepath(cfgPath))
-		if err != nil {
-			fmt.Print(err.Error())
-			return
+		if jobPath == "" {
+			fmt.Fprintf(streams.ErrOut, "getting coordinator: %s", err)
+			os.Exit(1)
 		}
 
-		go stopOnSigKill(stop)
-		if err := coord.Start(stop); err != nil {
+		cfg, err := lib.JSONJobConfigFromFilepath(jobPath)
+		if err != nil {
+			fmt.Fprintf(streams.ErrOut, "reading job file: %s", err)
+			os.Exit(1)
+		}
+
+		job, err := coord.NewJob(cfg)
+		if err != nil {
+			fmt.Fprintf(streams.ErrOut, "reading job file: %s", err)
+			os.Exit(1)
+		}
+
+		go stopOnSigKill(coord)
+		if err := coord.StartJob(job.ID); err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
@@ -40,7 +53,12 @@ var StartCmd = &cobra.Command{
 	},
 }
 
-func stopOnSigKill(stop chan bool) {
+func init() {
+	StartCmd.Flags().StringVarP(&jobPath, "job", "j", "", "path to a job file")
+	cobra.MarkFlagRequired(StartCmd.Flags(), "job")
+}
+
+func stopOnSigKill(coord lib.Coordinator) {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch,
 		syscall.SIGHUP,
@@ -57,11 +75,16 @@ func stopOnSigKill(stop chan bool) {
 		sigKilled = true
 
 		go func() {
+			remain, _ := coord.Queue().Len()
+
 			log.Infof(strings.Repeat("*", 72))
-			log.Infof("  received kill signal. stopping & writing file. this'll take a second")
+			log.Infof("  received kill signal. stopping & writing file")
+			log.Infof("  %d urls remain in the queue", remain)
 			log.Infof("  press ^C again to exit")
 			log.Infof(strings.Repeat("*", 72))
-			stop <- true
+			if err := coord.Shutdown(); err != nil {
+				panic(err)
+			}
 		}()
 	}
 }

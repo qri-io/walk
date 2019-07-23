@@ -1,0 +1,8 @@
+{
+    "Queue": {
+        "Type": "local"
+    },
+    "RequestStore": {
+        "Type": "local"
+    }
+}

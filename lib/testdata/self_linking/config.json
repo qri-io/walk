@@ -1,5 +1,5 @@
 {
-  "Coordinator": {
+  "Job": {
     "Crawl": true,
     "Domains": [],
     "IgnorePatterns": [],

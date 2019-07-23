@@ -17,11 +17,22 @@ type HTTPDirTestCase struct {
 }
 
 const (
-	// standard test case walk configuration file
-	configFilename = "config.json"
+	// standard test case coordinator configuration file
+	coordConfigFilename = "coordinator.config.json"
+	// standard test job configuration file
+	jobsConfigFilename = "job.config.json"
 	// standard test files that should be turned into a local server for testing
 	siteDirName = "site"
 )
+
+// MustCoordinator forces a test to fail if a coordinator can't be created
+func MustCoordinator(t *testing.T, newFunc func() (Coordinator, error)) Coordinator {
+	c, err := newFunc()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
 
 // NewHTTPDirTestCase creates a test case from a given filepath & testing struct
 func NewHTTPDirTestCase(t *testing.T, path string) *HTTPDirTestCase {
@@ -48,21 +59,32 @@ func (t *HTTPDirTestCase) Server() *httptest.Server {
 	return httptest.NewServer(http.FileServer(dir))
 }
 
-// Config generates the associated test case, with domains configured
+// CoordinatorConfig generates the associated test case, with domains configured
 // for the passed-in test server
-func (t *HTTPDirTestCase) Config(s *httptest.Server) func(c *Config) {
-	return func(c *Config) {
-		JSONConfigFromFilepath(filepath.Join(t.DirPath, configFilename))(c)
-		c.Coordinator.Domains = append(c.Coordinator.Domains, s.URL)
-		c.Coordinator.Seeds = append(c.Coordinator.Seeds, s.URL)
+func (t *HTTPDirTestCase) CoordinatorConfig() func(c *CoordinatorConfig) {
+	return func(c *CoordinatorConfig) {
+		JSONCoordinatorConfigFromFilepath(filepath.Join(t.DirPath, coordConfigFilename))(c)
 	}
 }
 
-// ServerJSONConfig creates a configuration from a file, replacing seed & domain
-// coordinator values with testserver urls
-func ServerJSONConfig(s *httptest.Server) func(c *Config) {
-	return func(c *Config) {
-		c.Coordinator.Domains = []string{s.URL}
-		c.Coordinator.Seeds = []string{s.URL}
-	}
+func (t *HTTPDirTestCase) Coordinator() (Coordinator, error) {
+	return NewCoordinator(t.CoordinatorConfig())
 }
+
+// JobConfig grabs the job configuration at testdir/job.config.json
+func (t *HTTPDirTestCase) JobConfig(s *httptest.Server) *JobConfig {
+	cfg := &JobConfig{}
+	JSONJobConfigFromFilepath(filepath.Join(t.DirPath, jobsConfigFilename))(cfg)
+	cfg.Domains = append(cfg.Domains, s.URL)
+	cfg.Seeds = append(cfg.Seeds, s.URL)
+	return cfg
+}
+
+// // ServerJSONConfig creates a configuration from a file, replacing seed & domain
+// // coordinator values with testserver urls
+// func ServerJSONConfig(s *httptest.Server) func(c *Config) {
+// 	return func(c *Config) {
+// 		c.Job.Domains = []string{s.URL}
+// 		c.Job.Seeds = []string{s.URL}
+// 	}
+// }

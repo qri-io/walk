@@ -31,6 +31,7 @@ func NewSitemapGenerator(prefix, dstPath string, db *badger.DB) *SitemapGenerato
 
 // HandleResource implements ResourceHandler to add sitemap
 func (g *SitemapGenerator) HandleResource(r *Resource) {
+	log.Debugf("sitemap: handle resource: %s", r.URL)
 	me := NewEntryFromResource(r)
 
 	key, err := g.key(me)
@@ -59,6 +60,7 @@ func (g *SitemapGenerator) HandleResource(r *Resource) {
 
 // FinalizeResources writes a json sitemap file to outpath
 func (g *SitemapGenerator) FinalizeResources() error {
+	log.Info("sitemap: finalizing")
 	if err := g.Generate(g.dstPath); err != nil {
 		return err
 	}
@@ -122,9 +124,9 @@ type Entry struct {
 	Title     string    `json:"title"`
 	Timestamp time.Time `json:"timestamp"`
 	Status    int       `json:"status"`
-	Redirects []string  `json:"redirects"`
-	Resources []string  `json:"resources"`
-	Links     []string  `json:"links"`
+	Redirects []string  `json:"redirects,omitempty"`
+	Resources []string  `json:"resources,omitempty"`
+	Links     []string  `json:"links,omitempty"`
 }
 
 // NewEntryFromResource pulls releveant values from a resource

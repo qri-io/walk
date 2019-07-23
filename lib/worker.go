@@ -12,7 +12,7 @@ import (
 // Worker is the interface turning Requests into Resources by performing fetches
 type Worker interface {
 	SetDelay(time.Duration)
-	Start(coord WorkCoordinator) error
+	Start(coord Coordinator) error
 	Stop() error
 }
 
@@ -41,7 +41,7 @@ func NewWorker(cfg *WorkerConfig) (w Worker, err error) {
 // LocalWorker is an in-process implementation of worker
 // TODO - finish parallelism implementation
 type LocalWorker struct {
-	coord    WorkCoordinator
+	coord    Coordinator
 	stop     chan bool
 	cfg      *WorkerConfig
 	fetchers []*fetchbot.Fetcher
@@ -65,13 +65,13 @@ func (w *LocalWorker) SetDelay(d time.Duration) {
 }
 
 // Start the local worker reporting results to the given coordinator
-func (w *LocalWorker) Start(coord WorkCoordinator) error {
+func (w *LocalWorker) Start(coord Coordinator) error {
 	w.coord = coord
 	cfg := w.cfg
 	w.fetchers = make([]*fetchbot.Fetcher, cfg.Parallelism)
 	w.queues = make([]*fetchbot.Queue, cfg.Parallelism)
 
-	ch, err := w.coord.Queue()
+	ch, err := w.coord.Queue().Chan()
 	if err != nil {
 		return err
 	}
@@ -104,7 +104,6 @@ func (w *LocalWorker) Start(coord WorkCoordinator) error {
 					continue
 				}
 				i = (i + 1) % len(w.queues)
-				time.Sleep(time.Duration(w.cfg.DelayMilli) * time.Millisecond)
 			case <-w.stop:
 				for _, q := range w.queues {
 					q.Close()
@@ -124,14 +123,14 @@ func (w *LocalWorker) Stop() error {
 }
 
 // newMux creates a muxer (response multiplexer) for a fetchbot
-func newMux(coord WorkCoordinator, recordRedirects, recordHeaders bool) *fetchbot.Mux {
+func newMux(coord Coordinator, recordRedirects, recordHeaders bool) *fetchbot.Mux {
 	// Create the muxer
 	mux := fetchbot.NewMux()
 
 	// Handle all errors the same
 	mux.HandleErrors(fetchbot.HandlerFunc(func(ctx *fetchbot.Context, res *http.Response, err error) {
 		log.Infof("[ERR] %s %s - %s", ctx.Cmd.Method(), ctx.Cmd.URL(), err.Error())
-		coord.Completed(&Resource{Error: err.Error()})
+		coord.CompletedResources(&Resource{Error: err.Error()})
 		return
 	}))
 
@@ -154,6 +153,7 @@ func newMux(coord WorkCoordinator, recordRedirects, recordHeaders bool) *fetchbo
 
 			log.Infof("[%d] %s %s", res.StatusCode, ctx.Cmd.Method(), r.URL)
 
+			// re-add jobID & start time from TimedCmd context
 			var st time.Time
 			if timedCmd, ok := ctx.Cmd.(*TimedCmd); ok {
 				r.JobID = timedCmd.JobID
@@ -165,7 +165,7 @@ func newMux(coord WorkCoordinator, recordRedirects, recordHeaders bool) *fetchbo
 				return
 			}
 
-			if err := coord.Completed(r); err != nil {
+			if err := coord.CompletedResources(r); err != nil {
 				log.Errorf("[ERR] coordinator: %s", err.Error())
 			}
 		}))
@@ -192,7 +192,7 @@ func stopHandler(stopurl string, stop chan bool, wrapped fetchbot.Handler) fetch
 
 // NewRecordRedirectClient creates a http client with a custom checkRedirect function that
 // creates records of Redirects & sends them to the coordinator
-func NewRecordRedirectClient(wc WorkCoordinator) *http.Client {
+func NewRecordRedirectClient(coord Coordinator) *http.Client {
 	return &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 
@@ -201,10 +201,16 @@ func NewRecordRedirectClient(wc WorkCoordinator) *http.Client {
 
 			canurlstr, _ := NormalizeURLString(req.URL.String())
 
+			jobID := ""
+			if coordReq, err := coord.RequestStore().GetRequest(prevurl); err == nil {
+				jobID = coordReq.JobID
+			}
+
 			if prevurl != canurlstr {
 				log.Infof("[%d] %s %s -> %s", req.Response.StatusCode, prev.Method, prevurl, canurlstr)
 
-				wc.Completed(&Resource{
+				coord.CompletedResources(&Resource{
+					JobID:     jobID,
 					URL:       prevurl,
 					Timestamp: time.Now(),
 					Status:    req.Response.StatusCode,

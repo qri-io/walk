@@ -1,190 +1,198 @@
 package lib
 
 import (
-	"bufio"
-	"bytes"
+	"context"
 	"fmt"
-	"io"
-	"io/ioutil"
-	"net/http"
-	"net/url"
-	"strconv"
-	"strings"
-	"sync"
 	"time"
+
+	"github.com/dgraph-io/badger"
 )
 
-// WorkCoordinator can coordinate workers. Workers pull from the output Requests
+// ErrNoBadgerConfig is the result of attempting to connect to a badgerDB
+// without one configured
+var ErrNoBadgerConfig = fmt.Errorf("badger is not configured")
+
+// Coordinator can coordinate workers. Workers pull from the output Requests
 // channel and post finished resources using the completed method. This is the
 // minimum interface a worker should need to turn Requests into Resources
-type WorkCoordinator interface {
+type Coordinator interface {
+	// NewJob creates a new job on this coordinator
+	NewJob(confg *JobConfig) (*Job, error)
+	// Jobs provides a list of jobs this Coordinator owns
+	Jobs() ([]*Job, error)
+	// Job fetches a single job from the coordinator
+	Job(id string) (*Job, error)
+	// StartJob Begins job execution
+	StartJob(id string) error
 	// Queue returns a channel of Requests, which contain urls that need
 	// to be fetched & turned into one or more resources
-	Queue() (chan *Request, error)
-	// Completed work is submitted to the coordinator by submitting one or more
+	Queue() Queue
+	// Coordinators must store a set of requests they've made
+	RequestStore() RequestStore
+	// Completed work is submitted to the Job by submitting one or more
 	// constructed resources
-	Completed(rsc ...*Resource) error
+	CompletedResources(rsc ...*Resource) error
+	// Shutdown stopts the coordinator, closing any jobs it owns. this can take
+	// some time (possibly minutes) to drain existing job queues & gracefully
+	// terminate
+	Shutdown() error
 }
 
-// Coordinator is the central reporting hub for a crawl. It's in charge of populating
-// the queue & keeping up-to-date records in the fetch request store. workers post their
-// completed work back to the coordinator, which sends the created resources to any
-// registered resource handlers
-type Coordinator struct {
-	// id for this crawl
-	jobID string
-	// time crawler started
-	start time.Time
-	// how many urls have been fetched and written to urls
-	urlsWritten int
-
-	// cfg embeds this crawl's configuration
-	cfg *CoordinatorConfig
-
-	// domains is a list of domains to fetch from
-	domains []*url.URL
-
-	queue    Queue
-	frs      RequestStore
-	handlers []ResourceHandler
-	workers  []Worker
-
-	// crawlDelay is the current delay between requests on fetchbots
-	// if Backoff is enabled this can get higher than cfg.CrawlDelayMilliseconds
-	crawlDelay time.Duration
-
-	// unexported channel to send stop signal on
-	stop chan bool
-	// flag indicating crawler is stopping
-	stopping bool
-	// finished is a count of the total number of urls finished
-	finished int
-}
-
-func newJobID() string {
-	return strconv.Itoa(1)
-}
-
-// NewWalkJob creates a new walk write process from a given set of configurations
-// if no configuration is provided, the default is used
-// start the walk by calling Start on the returned coordinator
-// halt the walk by sending a value on the returned stop channel
-func NewWalkJob(configs ...func(*Config)) (coord *Coordinator, stop chan bool, err error) {
+// NewCoordinator creates a coordinator
+func NewCoordinator(configs ...func(*CoordinatorConfig)) (coord Coordinator, err error) {
 	// combine configurations with default
-	cfg := ApplyConfigs(configs...)
-
-	jobID := newJobID()
+	cfg := ApplyCoordinatorConfigs(configs...)
 
 	// create queue, store, workers, and handlers
 	// TODO - needs to leverage config
 	queue := NewMemQueue()
+
+	var db *badger.DB
+	if cfg.Badger != nil {
+		if db, err = cfg.Badger.DB(); err != nil {
+			return
+		}
+	}
+
 	// TODO - needs to leverage config
-	frs := NewMemRequestStore()
-	ws, err := NewWorkers(cfg.Workers)
-	if err != nil {
-		return
-	}
-	hs, err := NewResourceHandlers(cfg)
-	if err != nil {
-		return
+	frs := NewBadgerRequestStore(db)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	coord = &coordinator{
+		ctx:    ctx,
+		cancel: cancel,
+
+		queue:  queue,
+		frs:    frs,
+		badger: db,
+
+		jobHandlers: map[string][]ResourceHandler{},
+		jobWorkers:  map[string][]Worker{},
+
+		processingChanges: make(chan int, 8),
+
+		shutdown: make(chan bool),
 	}
 
-	// create coodinator
-	coord = NewCoordinator(jobID, cfg.Coordinator, queue, frs, hs)
-	stop = make(chan bool)
-
-	// start workers
-	for _, w := range ws {
-		w.Start(coord)
-	}
+	go func(coord *coordinator) {
+		for {
+			select {
+			case add := <-coord.processingChanges:
+				coord.processing += add
+			case <-coord.ctx.Done():
+				return
+			}
+		}
+	}(coord.(*coordinator))
 
 	return
 }
 
-// Config exposes the coordinator configuration
-func (c *Coordinator) Config() *CoordinatorConfig {
-	return c.cfg
+// coordinator implements the Coordinator interface
+type coordinator struct {
+	ctx    context.Context // execution context
+	queue  Queue           // queue of resources to fetch
+	frs    RequestStore    // store of request history
+	badger *badger.DB      // coordinator requires a badger db connection
+
+	jobs        []*Job                       // jobs owned by the coordinator
+	jobHandlers map[string][]ResourceHandler // mapping of a job's handlers
+	jobWorkers  map[string][]Worker          // mapping of a job's workers
+
+	processing        int      // number of urls currently being processed
+	processingChanges chan int // channel to modify processing value
+
+	cancel   func()    // context cancel funce
+	shutdown chan bool // channel to trigger coordinator shutdown
+	stopping bool      // flag indicating coordinator is stopping
 }
 
-// NewCoordinator creates a Coordinator
-func NewCoordinator(jobID string, cfg *CoordinatorConfig, q Queue, frs RequestStore, rh []ResourceHandler) *Coordinator {
-	c := &Coordinator{
-		jobID:      jobID,
-		cfg:        cfg,
-		queue:      q,
-		frs:        frs,
-		handlers:   rh,
-		crawlDelay: time.Duration(cfg.DelayMilli) * time.Millisecond,
-	}
+// Jobs lists all jobs being coordinated
+func (coord *coordinator) Jobs() ([]*Job, error) {
+	return coord.jobs, nil
+}
 
-	c.domains = make([]*url.URL, len(cfg.Domains))
-	for i, rawurl := range cfg.Domains {
-		u, err := url.Parse(rawurl)
-		if err != nil {
-			err = fmt.Errorf("error parsing configured domain: %s", err.Error())
-			log.Error(err.Error())
-			return c
+// Job gets a coordinated job by ID
+func (coord *coordinator) Job(id string) (*Job, error) {
+	for _, job := range coord.jobs {
+		if job.ID == id {
+			return job, nil
 		}
-		c.domains[i] = u
 	}
 
-	return c
+	return nil, fmt.Errorf("coord: job not found")
 }
 
-// SetHandlers configures the coordinator's resource handlers
-func (c *Coordinator) SetHandlers(rh []ResourceHandler) error {
-	if !c.start.IsZero() {
-		return fmt.Errorf("crawl already started")
+// NewJob creates and starts a job
+func (coord *coordinator) NewJob(cfg *JobConfig) (*Job, error) {
+	job := newJob(cfg, coord)
+	coord.jobs = append(coord.jobs, job)
+
+	ws, err := NewWorkers(cfg.Workers)
+	if err != nil {
+		job.Errored(err)
+		return nil, err
 	}
-	c.handlers = rh
-	return nil
+	coord.jobWorkers[job.ID] = ws
+
+	rhs, err := NewResourceHandlers(coord.badger, cfg.ResourceHandlers)
+	if err != nil {
+		job.Errored(err)
+		return nil, err
+	}
+
+	coord.jobHandlers[job.ID] = rhs
+
+	return job, nil
 }
 
-// ResourceHandlers exposes the coordinator's ResourceHandlers
-func (c *Coordinator) ResourceHandlers() []ResourceHandler {
-	return c.handlers
-}
+// StartJob begins executing a job
+func (coord *coordinator) StartJob(id string) error {
+	job, err := coord.Job(id)
+	if err != nil {
+		return err
+	}
 
-// Start kicks off coordinated fetching, seeding the queue & store & awaiting responses
-// start will block until a signal is received on the stop channel, keep in mind
-// a number of conditions can stop the crawler depending on configuration
-func (c *Coordinator) Start(stop chan bool) (err error) {
-	var (
-		seedr                           io.Reader
-		unfetchedT, backoffT, doneScanT *time.Ticker
-		finalizerErrs                   []error
-		wg                              sync.WaitGroup
-	)
-	c.stop = stop
+	// start workers
+	for _, w := range coord.jobWorkers[job.ID] {
+		if err := w.Start(coord); err != nil {
+			return err
+		}
+	}
 
-	if len(c.cfg.BackoffResponseCodes) > 0 {
-		backoffT = time.NewTicker(time.Minute)
+	if job.status == JobStatusNew {
+		// setup channel of seed urls
+		seeds, err := job.Seeds()
+		if err != nil {
+			err = fmt.Errorf("reading seeds: %s", err.Error())
+			job.Errored(err)
+			return err
+		}
+
+		// read seeds into the coordinator queue
 		go func() {
-			for range backoffT.C {
-				if c.crawlDelay > time.Duration(c.cfg.DelayMilli)*time.Millisecond {
-					log.Infof("speeding up crawler")
-					c.setCrawlDelay(c.crawlDelay - (time.Duration(c.cfg.DelayMilli)*time.Millisecond)/2)
-				}
+			for url := range seeds {
+				coord.enqueue(&Request{JobID: job.ID, URL: url})
 			}
 		}()
 	}
 
-	if seedr, err = c.enqueSeedsPath(); err != nil {
-		return fmt.Errorf("getting SeedsPath: %s", err.Error())
-	}
-
-	if c.cfg.DoneScanMilli > 0 {
-		doneScanT = time.NewTicker(time.Millisecond * time.Duration(c.cfg.DoneScanMilli))
-		log.Debugf("performing done scan checks every %d secs.", c.cfg.DoneScanMilli/1000)
+	// start scanning for completion
+	if job.cfg.DoneScanMilli > 0 {
+		// TODO (b5): This is checking the _entire_ queue & frs. won't work when multiple
+		// jobs are running (will require both to completely finish before "done" is ever triggered)
+		doneScanT := time.NewTicker(time.Millisecond * time.Duration(job.cfg.DoneScanMilli))
+		log.Debugf("coord: performing done scan checks every %d secs.", job.cfg.DoneScanMilli/1000)
 		go func() {
 			for range doneScanT.C {
-				l, err := c.queue.Len()
+				l, err := coord.queue.Len()
 				if err != nil {
 					log.Errorf("error getting queue length: %s", err.Error())
 					continue
 				}
 				if l == 0 {
-					reqs, err := c.frs.List(-1, 0)
+					reqs, err := coord.frs.ListRequests(-1, 0)
 					if err != nil {
 						log.Errorf("error reading: %s", err.Error())
 						continue
@@ -194,237 +202,187 @@ func (c *Coordinator) Start(stop chan bool) (err error) {
 							continue
 						}
 					}
+					if coord.processing > 0 {
+						continue
+					}
 					log.Info("no urls remain for checking, nothing left in queue, we done")
-					c.stop <- true
+					// c.stop <- true
+					// job.Complete()
+					coord.Shutdown()
 					return
 				}
 			}
 		}()
 	}
 
-	c.start = time.Now()
-
-	if seedr != nil {
-		go func(s *bufio.Scanner) {
-			for s.Scan() {
-				c.enqueue(&Request{URL: s.Text()})
-			}
-		}(bufio.NewScanner(seedr))
-	}
-
-	for _, url := range c.cfg.Seeds {
-		c.enqueue(&Request{URL: url})
-	}
-
-	// block until receive on stop
-	<-c.stop
-
-	// TODO - send stop signal to workers
-
-	// log.Infof("%d urls remain in que for checking and processing", len(c.next))
-	if unfetchedT != nil {
-		unfetchedT.Stop()
-	}
-	if backoffT != nil {
-		backoffT.Stop()
-	}
-
-	for _, rh := range c.ResourceHandlers() {
-		if finalizer, ok := rh.(ResourceFinalizer); ok {
-			wg.Add(1)
-			go func(t string, f ResourceFinalizer, errs *[]error) {
-				if err := f.FinalizeResources(); err != nil {
-					*errs = append(*errs, fmt.Errorf("%s: %s", t, err))
-				}
-				wg.Done()
-			}(rh.Type(), finalizer, &finalizerErrs)
-		}
-	}
-	wg.Wait()
-
-	if len(finalizerErrs) > 0 {
-		msg := "errors occured during finalization:\n"
-		for _, e := range finalizerErrs {
-			msg += fmt.Sprintf("%s\n", e.Error())
-		}
-		return fmt.Errorf(msg)
+	log.Infof("coord: starting job: %s", id)
+	if err := job.Start(); err != nil {
+		job.Errored(err)
+		return err
 	}
 
 	return nil
 }
 
-func (c *Coordinator) enqueSeedsPath() (r io.Reader, err error) {
-	if c.cfg.SeedsPath == "" {
-		return nil, nil
-	}
+// Shutdown halts the coordinator
+func (coord *coordinator) Shutdown() error {
+	log.Debug("coord: shutting down")
+	coord.stopping = true
 
-	if _, err := url.ParseRequestURI(c.cfg.SeedsPath); err == nil {
-		log.Info("fetching SeedsPath URL")
-		res, err := http.Get(c.cfg.SeedsPath)
-		if err != nil {
-			return nil, err
-		}
-		data, err := ioutil.ReadAll(res.Body)
-		if err != nil {
-			return nil, err
-		}
-		res.Body.Close()
-		return bytes.NewBuffer(data), nil
+	// wait if there are still urls in the queue
+	// TODO (b5): drain existing queue into badger
+	if leng, err := coord.queue.Len(); err == nil && leng > 0 {
+		coord.shutdown <- true
 	}
+	coord.cancel()
 
-	log.Info("reading SeedsPath file")
-	data, err := ioutil.ReadFile(c.cfg.SeedsPath)
-	if err != nil {
-		return nil, err
+	for _, rhs := range coord.jobHandlers {
+		for _, rh := range rhs {
+			if finalizer, ok := rh.(ResourceFinalizer); ok {
+				log.Infof("finalizing: %s", rh.Type())
+				finalizer.FinalizeResources()
+			}
+		}
 	}
-	return bytes.NewBuffer(data), nil
+	return nil
 }
 
 // Queue gives access to the underlying queue as a channel of Fetch Requests
-func (c *Coordinator) Queue() (chan *Request, error) {
-	return c.queue.Chan()
+func (coord *coordinator) Queue() Queue {
+	return coord.queue
 }
 
-// Completed sends one or more constructed resources to the coordinator
-func (c *Coordinator) Completed(rsc ...*Resource) error {
+// RequestStore exposes the coordinator's Fetch Request Store
+func (coord *coordinator) RequestStore() RequestStore {
+	return coord.frs
+}
+
+// CompletedResources sends one or more constructed resources to the coordinator
+func (coord *coordinator) CompletedResources(rsc ...*Resource) error {
 
 	// handle any global state changes that may result from completed work
 	// TODO - finish
-	go func() {
-		// for _, resc := range c.cfg.BackoffResponseCodes {
-		// 	if res.StatusCode == resc {
-		// 		log.Infof("encountered %d response. backing off", resc)
-		// 		c.setCrawlDelay(c.crawlDelay + ((time.Duration(c.cfg.CrawlDelayMilliseconds) * time.Millisecond) / 2))
-		// 	}
-		// }
-		// if c.finished == c.cfg.StopAfterEntries {
-		// 	stop <- true
-		// }
-	}()
+	// go func() {
+	// for _, resc := range c.cfg.BackoffResponseCodes {
+	// 	if res.StatusCode == resc {
+	// 		log.Infof("encountered %d response. backing off", resc)
+	// 		c.setCrawlDelay(c.crawlDelay + ((time.Duration(c.cfg.CrawlDelayMilliseconds) * time.Millisecond) / 2))
+	// 	}
+	// }
+	// if c.finished == c.cfg.StopAfterEntries {
+	// 	stop <- true
+	// }
+	// }()
 
 	// handle resources and create a deduplicated map
 	// of unique candidate urls from all responses
-	links := map[string]bool{}
+	links := map[string]string{}
+	linkCount := 0
 	for _, r := range rsc {
-		if err := c.dequeue(r); err != nil {
-			log.Debugf("error dequing url: %s: %s", r.URL, err.Error())
+		job, err := coord.Job(r.JobID)
+		if err != nil {
+			log.Errorf("couldn't find job for completed resource: %s", r.URL)
+			continue
 		}
-
-		if c.cfg.Crawl {
+		if err := coord.dequeue(job, r); err != nil {
+			log.Debugf("coord: error dequing url: %s: %s", r.URL, err.Error())
+		}
+		if job.cfg.Crawl {
 			for _, l := range r.Links {
-				if c.urlStringIsCandidate(l) {
-					links[l] = true
+				linkCount++
+				if job.urlStringIsCandidate(l) {
+					links[l] = r.JobID
 				}
 			}
 		}
 	}
 
-	for url := range links {
-		r, err := c.frs.Get(url)
-		if err != nil {
-			log.Debugf("err getting url: %s: %s", url, err.Error())
+	log.Debugf("coord: completed %d resources with %d/%d links", len(rsc), len(links), linkCount)
+	for url, jobID := range links {
+		r, err := coord.frs.GetRequest(url)
+		if err != nil && err != ErrNotFound {
+			log.Debugf("coord: err getting url: %s: %s", url, err.Error())
 		}
 		if r == nil {
-			c.enqueue(&Request{URL: url})
+			coord.enqueue(&Request{URL: url, JobID: jobID})
 		}
 	}
 
 	return nil
 }
 
-func (c *Coordinator) enqueue(rs ...*Request) {
+func (coord *coordinator) enqueue(rs ...*Request) {
 	for _, r := range rs {
-		r.JobID = c.jobID
-		if c.stopping {
+		if coord.stopping {
 			r.Status = RequestStatusFailed
-			c.frs.Put(r)
+			coord.frs.PutRequest(r)
 			continue
 		}
 
-		log.Debugf("enqueue: %s", r.URL)
+		log.Debugf("coord: enqueue: %s", r.URL)
 		r.Status = RequestStatusQueued
-		c.frs.Put(r)
-		c.queue.Push(r)
+		coord.frs.PutRequest(r)
+		coord.queue.Push(r)
+		coord.processingChanges <- 1
 	}
 }
 
-func (c *Coordinator) dequeue(rsc *Resource) error {
-	fr, err := c.frs.Get(rsc.URL)
+func (coord *coordinator) dequeue(job *Job, rsc *Resource) error {
+	fr, err := coord.frs.GetRequest(rsc.URL)
 	if err == ErrNotFound {
 		fr = &Request{URL: rsc.URL}
 	} else if err != nil {
-		log.Debugf("err getting url: %s: %s", rsc.URL, err.Error())
+		log.Debugf("coord: err getting url: %s: %s", rsc.URL, err.Error())
 		return err
 	}
 
 	fr.PrevResStatus = rsc.Status
 	fr.AttemptsMade++
 
-	if c.okResponseStatus(fr.PrevResStatus) {
-		log.Debugf("dequeue: %s", fr.URL)
-		c.finished++
-		c.urlsWritten++
-		fr.Status = RequestStatusDone
-		// send completed records to each handler
-		for _, h := range c.handlers {
-			go h.HandleResource(rsc)
+	// job, err := coord.Job(rsc.JobID)
+	// if err != nil {
+	// 	log.Errorf("finding job for dequed url: %s", err)
+	// 	return nil
+	// }
+
+	defer func() {
+		coord.processingChanges <- -1
+
+		if coord.stopping {
+			if leng, err := coord.queue.Len(); leng == 0 && err == nil {
+				// read off shutdown channel
+				<-coord.shutdown
+			}
 		}
-		if c.cfg.StopURL == fr.URL {
-			log.Infof("stop url encountered, stopping")
+
+		if job.cfg.StopURL == fr.URL {
+			log.Infof("coord: stop url encountered, stopping")
 			// TODO (b5): horrible hack to make sure local tests pass b/c too much parallelism
 			// should cleanup & use a channel to wait for handle resources goroutines above
 			// to finish
+			// TODO - this will now break all sorts of stuff, clean this up
 			time.Sleep(time.Millisecond * 100)
-			c.stop <- true
+			coord.Shutdown()
+		}
+	}()
+
+	if job.okResponseStatus(fr.PrevResStatus) {
+		log.Debugf("coord: dequeue: %s", fr.URL)
+
+		job.finished++
+		fr.Status = RequestStatusDone
+		// send completed records to each handler
+		for _, h := range coord.jobHandlers[job.ID] {
+			go h.HandleResource(rsc)
 		}
 		return nil
 	}
 
-	if fr.AttemptsMade <= c.cfg.MaxAttempts {
-		c.enqueue(fr)
+	if fr.AttemptsMade <= job.cfg.MaxAttempts {
+		coord.enqueue(fr)
 		return nil
 	}
 
 	fr.Status = RequestStatusFailed
-	return c.frs.Put(fr)
-}
-
-func (c *Coordinator) setCrawlDelay(d time.Duration) {
-	c.crawlDelay = d
-	for _, c := range c.workers {
-		c.SetDelay(d)
-	}
-	log.Infof("crawler delay is now: %f seconds", c.crawlDelay.Seconds())
-	log.Infof("crawler request frequency: ~%f req/minute", float64(len(c.workers))/c.crawlDelay.Minutes())
-}
-
-// urlStringIsCandidate scans the slice of crawlingURLS to see if we should GET
-// the passed-in url
-// TODO - this is slated to eventually not be a simple list of ignored URLs,
-// but a list of regexes or some other special pattern.
-func (c *Coordinator) urlStringIsCandidate(rawurl string) bool {
-	for _, ignore := range c.cfg.IgnorePatterns {
-		if strings.Contains(rawurl, ignore) {
-			return false
-		}
-	}
-
-	u, err := url.Parse(rawurl)
-	if err != nil {
-		return false
-	}
-	for _, d := range c.domains {
-		if d.Host != u.Host {
-			continue
-		} else if u.Path != "" && !strings.HasPrefix(u.Path, d.Path) {
-			return false
-		}
-
-		return true
-	}
-	return false
-}
-
-func (c *Coordinator) okResponseStatus(s int) bool {
-	return s >= http.StatusOK && s <= http.StatusPermanentRedirect
+	return coord.frs.PutRequest(fr)
 }

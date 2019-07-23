@@ -10,15 +10,9 @@ import (
 
 // Server wraps a collection, turning it into an API server
 type Server struct {
-	collection lib.Collection
-	server     *http.Server
-}
-
-// NewServer creates a new server
-func NewServer(col lib.Collection) *Server {
-	return &Server{
-		collection: col,
-	}
+	Coordinator lib.Coordinator
+	Collection  lib.Collection
+	server      *http.Server
 }
 
 // Serve Blocks
@@ -35,7 +29,7 @@ func (s *Server) Serve(port string) (err error) {
 // returns the version of qri this node is running, pulled from the lib package
 func HealthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{ "meta": { "code": 200, "status": "ok", "version":"` + lib.VersionNumber + `" }, "data": [] }`))
+	w.Write([]byte(`{"meta":{"code":200,"status":"ok","version":"` + lib.VersionNumber + `"},"data":[]}`))
 }
 
 // NotFoundHandler indicates a route wasn't found
@@ -46,7 +40,7 @@ func NotFoundHandler(w http.ResponseWriter, r *http.Request) {
 func writeNotFound(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotFound)
-	w.Write([]byte(`{ "meta": { "code": 404, "status": "not found", "version":"` + lib.VersionNumber + `" }, "data": [] }`))
+	w.Write([]byte(`{"meta":{"code":404,"status":"not found","version":"` + lib.VersionNumber + `" },"data":[]}`))
 }
 
 // NewServerRoutes returns a Muxer that has all API routes
@@ -56,7 +50,7 @@ func NewServerRoutes(s *Server) *http.ServeMux {
 	m.Handle("/", s.middleware(NotFoundHandler))
 	m.Handle("/status", s.middleware(HealthCheckHandler))
 
-	ch := CollectionHandlers{collection: s.collection}
+	ch := CollectionHandlers{collection: s.Collection}
 	m.Handle("/collection", s.middleware(ch.HandleListWalks))
 	m.Handle("/collection/", s.middleware(ch.HandleWalkIndex))
 	m.Handle("/captures", s.middleware(ch.HandleCollectionIndex))
@@ -65,6 +59,10 @@ func NewServerRoutes(s *Server) *http.ServeMux {
 	m.Handle("/captures/meta/resolved/", s.middleware(ch.HandleResolvedResourceMeta))
 	m.Handle("/captures/raw/", s.middleware(ch.HandleRawResource))
 	m.Handle("/captures/resolved/", s.middleware(ch.HandleResolvedResource))
+
+	jh := JobHandlers{coord: s.Coordinator}
+	m.Handle("/jobs", s.middleware(jh.HandleListJobs))
+	m.Handle("/jobs/", s.middleware(jh.HandleJobs))
 
 	return m
 }

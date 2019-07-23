@@ -1,10 +1,7 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/qri-io/walk/api"
-	"github.com/qri-io/walk/lib"
 	"github.com/spf13/cobra"
 )
 
@@ -13,22 +10,18 @@ var ServerCmd = &cobra.Command{
 	Use:   "server",
 	Short: "start an api server",
 	Run: func(cmd *cobra.Command, args []string) {
-		cfgPath, err := cmd.Flags().GetString("config")
-		if err != nil {
-			fmt.Printf("error getting config: %s", err.Error())
-		}
-
-		cfg, err := lib.ReadJSONConfigFile(cfgPath)
+		coord, err := getCoordinator(cmd)
 		if err != nil {
 			panic(err)
 		}
 
-		collection, err := lib.NewCollectionFromConfig(cfg.Collection)
-		if err != nil {
-			panic(err)
-		}
+		// TODO (b5): restore collection support for api server
+		// collection, err := lib.NewCollectionFromConfig(coord)
+		// if err != nil {
+		// 	panic(err)
+		// }
 
-		s := api.NewServer(collection)
+		s := api.Server{Coordinator: coord}
 		if err := s.Serve("3000"); err != nil {
 			panic(err)
 		}
